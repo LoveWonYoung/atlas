@@ -6,7 +6,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/LoveWonYoung/canbuskit/uds_client"
+	"github.com/LoveWonYoung/atlas/uds_client"
 )
 
 var ErrSecKeyUnsupported = errors.New("SecKey.dll is only supported on windows")

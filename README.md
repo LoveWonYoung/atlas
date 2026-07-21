@@ -1,27 +1,35 @@
-# canbuskit
+# atlas
 
-`canbuskit` 是一个面向 Go 的 CAN / CAN FD 诊断工具库，提供了：
+`atlas` 是一个面向 Go 的 CAN、CAN FD 和 LIN 总线设备与诊断库。CAN 能力来自 canbuskit，LIN 能力已从 linbuskit 合入；同一项目现在可以通过 `device.Init` 使用统一的设备初始化入口。
 
-- 多种底层 CAN 驱动封装
+项目提供：
+
+- Toomoss、TSMaster 等底层设备封装
+- CAN / CAN FD 与 LIN 的统一设备初始化入口
 - ISO-TP 传输层实现
-- UDS 客户端
+- LIN Transport Protocol 实现
+- UDS over CAN 与 UDS over LIN 客户端
 - 常见 UDS 服务封装
 - 面向刷写场景的 HEX / SREC 分块辅助能力
 
-项目适合做 ECU 诊断、刷写、自动化测试，以及把不同 CAN 硬件接入统一的 Go 接口。
+项目适合做 ECU 诊断、刷写、自动化测试，以及把不同总线和硬件接入统一的 Go 接口。
 
 ## 模块结构
 
-仓库主要分成四层：
+仓库的主要包如下：
 
-- `driver`：底层 CAN 驱动统一接口，屏蔽不同厂商设备差异
+- `device`：CAN / LIN 共用的设备初始化和生命周期入口
+- `driver`：底层 CAN / CAN FD 驱动
+- `lindriver`：底层 LIN 驱动
+- `liniface`：LIN 驱动公共接口和帧类型
 - `tp_layer`：ISO-15765-2 传输层，实现单帧、多帧、流控、超时管理
-- `uds_client`：基于 `driver + ISO-TP` 的 UDS 客户端，负责请求、超时、负响应和重试逻辑
+- `tplin`：LIN 传输层及主站、从站、模拟网络
+- `uds_client`：UDS over CAN 和 UDS over LIN 客户端
 - `services`：对常见 UDS 服务做了更高层封装
 
 如果现成服务不够用，也可以直接调用 `UDSClient.Request(...)` 发送任意 SID。
 
-## 已支持的驱动
+## 已支持的设备
 
 ### 本地硬件驱动
 
@@ -38,11 +46,66 @@
   - Windows
   - 按 `Toomoss -> TSMaster -> PCAN -> Vector` 顺序自动选择第一个可用设备
 
+LIN 驱动：
+
+- `lindriver.NewToomoss(...)`：Windows、macOS（`darwin && cgo`）
+- `lindriver.NewTSMaster(...)`：Windows
+- `lindriver.NewMockDriver()`：所有平台，用于测试
+
+新代码建议优先使用 `device.Init(...)`，只有需要厂商专有能力时才直接构造底层驱动。
+
 ## 安装
 
 ```bash
-go get github.com/LoveWonYoung/canbuskit
+go get github.com/LoveWonYoung/atlas
 ```
+
+## 统一初始化
+
+CAN、CAN FD 和 LIN 共用一个初始化函数。返回的 `Device` 统一负责关闭底层资源。
+
+CAN FD + Toomoss：
+
+```go
+dev, err := device.Init(device.Config{
+    Bus:      device.BusCAN,
+    Provider: device.ProviderToomoss,
+    CAN: device.CANConfig{
+        Type:    driver.CANFD,
+        Channel: driver.CHANNEL1,
+    },
+})
+if err != nil {
+    log.Fatal(err)
+}
+defer dev.Close()
+
+canDriver := dev.CANDriver()
+```
+
+LIN + Toomoss：
+
+```go
+dev, err := device.Init(device.Config{
+    Bus:      device.BusLIN,
+    Provider: device.ProviderToomoss,
+    LIN: device.LINConfig{
+        Channels: []liniface.Channel{0, 1},
+        BaudRate: 19_200,
+        Mode:     device.LINMaster,
+    },
+})
+if err != nil {
+    log.Fatal(err)
+}
+defer dev.Close()
+
+linDriver := dev.LINDriver()
+client := uds_client.NewClient(linDriver, 0x01)
+defer client.Close()
+```
+
+`ProviderAuto` 在 Windows 的 CAN 模式下按 Toomoss、TSMaster、PCAN、Vector 的顺序探测。未填写 LIN 通道、波特率和模式时，默认使用通道 0、19.2 kbit/s、主站模式。
 
 ## 快速开始
 
@@ -57,10 +120,10 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/LoveWonYoung/canbuskit/driver"
-	"github.com/LoveWonYoung/canbuskit/services"
-	isotp "github.com/LoveWonYoung/canbuskit/tp_layer"
-	"github.com/LoveWonYoung/canbuskit/uds_client"
+    "github.com/LoveWonYoung/atlas/driver"
+    "github.com/LoveWonYoung/atlas/services"
+    isotp "github.com/LoveWonYoung/atlas/tp_layer"
+    "github.com/LoveWonYoung/atlas/uds_client"
 )
 
 func main() {
@@ -99,7 +162,7 @@ func main() {
 dev := driver.NewAutoDriver(driver.CANFD)
 ```
 
-## 寻址与 ISO-TP 配置
+## CAN 寻址与 ISO-TP 配置
 
 `tp_layer` 支持多种寻址模式：
 
@@ -127,7 +190,7 @@ cfg := isotp.DefaultConfig()
 
 ## UDS 客户端能力
 
-`uds_client.UDSClient` 负责：
+CAN 使用 `uds_client.UDSClient`，负责：
 
 - 请求发送与响应接收
 - 超时管理
@@ -153,6 +216,20 @@ cfg := isotp.DefaultConfig()
 ```go
 resp, err := client.Request([]byte{0x10, 0x03})
 ```
+
+LIN 使用 `uds_client.Client`，底层连接 `tplin`：
+
+```go
+client := uds_client.NewClient(linDriver, 0x01)
+defer client.Close()
+
+responseNAD, resp, err := client.SendAndRec(
+    []byte{0x22, 0xF1, 0x89},
+    2*time.Second,
+)
+```
+
+`tplin.NewMaster`、`tplin.NewSlave` 和 `tplin.NewSimulatedLinNetwork` 也可以用于更底层的 LIN 主从通信与无硬件测试。
 
 ## 已封装的 UDS 服务
 
@@ -243,7 +320,9 @@ if err != nil {
 
 ## 注意事项
 
-- `driver` 层只提供统一的 `Write(id, fd, data)` 能力，通过 `fd` 标志在同一函数里发送 CAN / CAN-FD。
+- `driver` 的 `Write(id, fd, data)` 通过 `fd` 标志发送 CAN / CAN FD。
+- `lindriver` 实现 `liniface.Driver`；LIN 通道从 0 开始编号。
+- `device.Device` 一次只表示一种总线连接；需要 CAN 和 LIN 时分别调用 `device.Init`，并分别关闭。
 - `services` 只封装了部分常见 UDS 服务；其他服务建议直接用 `UDSClient.Request(...)`。
 - `UDSClient.Close()` 会同时关闭后台 goroutine 和底层设备连接，使用结束后应主动调用。
 

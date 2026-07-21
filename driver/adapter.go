@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/LoveWonYoung/canbuskit/tp_layer"
+	"github.com/LoveWonYoung/atlas/tp_layer"
 )
 
 // Adapter is link udsclient hardware adapter of can device

@@ -11,7 +11,7 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/LoveWonYoung/canbuskit/uds_client"
+	"github.com/LoveWonYoung/atlas/uds_client"
 )
 
 const defaultSecKeyDLL = "SecKey.dll"
