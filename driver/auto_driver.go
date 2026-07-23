@@ -35,9 +35,9 @@ func (a *AutoDriver) Init() error {
 		driver CANDriver
 	}{
 		{name: "Toomoss CAN 1 500K 2M", driver: NewToomoss(a.canType, CHANNEL1)},
-		{name: "TSMaster CAN 1 500K 2M", driver: NewTSMaster(a.canType, CHANNEL1)},
+		{name: "TSMaster CAN 1 500K 2M", driver: NewTSMaster(a.canType, CHANNEL1, TC1016)},
 		{name: "PCAN CAN 1 500K 2M", driver: NewPCAN(a.canType, CHANNEL1)},
-		{name: "Vector", driver: NewVector(a.canType, CANOEVN1640, CHANNEL4)},
+		{name: "Vector", driver: NewVector(a.canType, XL_VN1640, CHANNEL4)},
 	}
 
 	var errs []string

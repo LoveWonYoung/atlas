@@ -275,7 +275,7 @@ func pcanDLLCandidates() []string {
 		add(filepath.Join(envDir, pcanDLLName))
 	}
 
-	add(filepath.Join(".", "bin", archDLLDir(), pcanDLLName))
+	add(filepath.Join(".", "bin", pcanDLLName))
 	add(pcanDLLName)
 
 	programRoots := []string{

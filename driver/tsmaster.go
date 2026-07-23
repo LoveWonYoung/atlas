@@ -13,8 +13,6 @@ import (
 	"runtime"
 	"syscall"
 	"time"
-
-	// "time"
 	"unsafe"
 
 	"golang.org/x/sys/windows/registry"
@@ -145,9 +143,10 @@ type TSMaster struct {
 	cancel      context.CancelFunc
 	canType     CanType
 	CANChannel  byte
+	DeviceType  int
 }
 
-func NewTSMaster(cantype CanType, canChannel byte) *TSMaster {
+func NewTSMaster(cantype CanType, canChannel byte, DeviceType int) *TSMaster {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &TSMaster{
 		rxChan:     make(chan UnifiedCANMessage, RxChannelBufferSize),
@@ -155,6 +154,7 @@ func NewTSMaster(cantype CanType, canChannel byte) *TSMaster {
 		cancel:     cancel,
 		canType:    cantype,
 		CANChannel: canChannel,
+		DeviceType: DeviceType,
 	}
 }
 
@@ -219,7 +219,19 @@ func (t *TSMaster) Init() error {
 	// 设置CAN通道数量
 	r, _, _ = t.loader.GetProcAddress("tsapp_set_can_channel_count").Call(uintptr(4))
 	fmt.Printf("Set CAN channel count result: %d\n", r)
-	deviceName, _ := syscall.UTF16PtrFromString("TC1016")
+	var deviceType = -1
+	var deviceName_ = ""
+	for k, v := range TSMasterMap {
+		fmt.Printf("key=%s, value=%d\n", k, v)
+		if v == t.DeviceType {
+			deviceType = v
+			deviceName_ = k
+		}
+	}
+	if deviceType == -1 || deviceName_ == "" {
+		return cleanup(fmt.Errorf("tsapp_set_can_channel_count failed: %d", deviceType))
+	}
+	deviceName, _ := syscall.UTF16PtrFromString(deviceName_)
 	// 设置映射
 	r, _, _ = t.loader.GetProcAddress("tsapp_set_mapping_verbose").Call(
 		uintptr(unsafe.Pointer(appName)),
@@ -227,13 +239,12 @@ func (t *TSMaster) Init() error {
 		uintptr(0),
 		uintptr(unsafe.Pointer(deviceName)),
 		uintptr(3),
-		uintptr(11),
+		uintptr(deviceType),
 		uintptr(0),
 		uintptr(0),
 		uintptr(1), // True
 	)
 	fmt.Printf("Set mapping verbose result: %d\n", r)
-	//tsapp_configure_baudrate_canfd(0, 500.0, 2000.0, 1, 0, True):
 	br := float32(500.0)
 	bd := float32(2000.0)
 	r, _, _ = t.loader.GetProcAddress("tsapp_configure_baudrate_canfd").Call(
