@@ -16,9 +16,7 @@ func newRxFanout(ctx context.Context, source <-chan UnifiedCANMessage) *rxFanout
 	f := &rxFanout{
 		subs: make(map[chan UnifiedCANMessage]struct{}),
 	}
-	f.wg.Add(1)
-	go func() {
-		defer f.wg.Done()
+	f.wg.Go(func() {
 		for {
 			select {
 			case <-ctx.Done():
@@ -32,7 +30,7 @@ func newRxFanout(ctx context.Context, source <-chan UnifiedCANMessage) *rxFanout
 				f.dispatch(msg)
 			}
 		}
-	}()
+	})
 	return f
 }
 
