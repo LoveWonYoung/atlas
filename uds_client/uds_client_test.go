@@ -178,12 +178,12 @@ func TestUDSError_Error(t *testing.T) {
 	err := &UDSError{
 		ServiceID: 0x22,
 		NRC:       ServiceNotSupported,
-		Message:   "服务不支持",
+		Message:   "ServiceNotSupported",
 	}
 
-	expected := "UDS 负响应: SID=0x22, NRC=0x11 (服务不支持)"
+	expected := "UDS negative response: SID=0x22, NRC=0x11 (ServiceNotSupported)"
 	if err.Error() != expected {
-		t.Errorf("错误消息不匹配\n期望: %s\n实际: %s", expected, err.Error())
+		t.Errorf("error message mismatch\nexpected: %s\nactual: %s", expected, err.Error())
 	}
 }
 
@@ -233,13 +233,13 @@ func TestGetNRCDescription(t *testing.T) {
 		{GeneralReject, "GeneralReject"},
 		{ServiceNotSupported, "ServiceNotSupported"},
 		{RequestCorrectlyReceived_ResponsePending, "RequestCorrectlyReceived_ResponsePending"},
-		{0xFF, "未知错误"}, // 未知 NRC
+		{0xFF, "Unknown error"}, // Unknown NRC
 	}
 
 	for _, tc := range tests {
 		desc := getNRCDescription(tc.nrc)
 		if desc != tc.expected {
-			t.Errorf("NRC=0x%02X: 期望描述=%s, 实际=%s", tc.nrc, tc.expected, desc)
+			t.Errorf("NRC=0x%02X: expected=%s, actual=%s", tc.nrc, tc.expected, desc)
 		}
 	}
 }
@@ -321,7 +321,7 @@ func TestUDSError_TypeAssertion(t *testing.T) {
 	var err error = &UDSError{
 		ServiceID: 0x10,
 		NRC:       ConditionsNotCorrect,
-		Message:   "条件不满足",
+		Message:   "ConditionsNotCorrect",
 	}
 
 	// 使用 errors.As 进行类型断言
@@ -555,8 +555,8 @@ func TestAllNRCDescriptions(t *testing.T) {
 
 	for _, nrc := range allNRCs {
 		desc := getNRCDescription(nrc)
-		if desc == "未知错误" {
-			t.Errorf("NRC=0x%02X 应该有描述，但返回了 '未知错误'", nrc)
+		if desc == "Unknown error" {
+			t.Errorf("NRC=0x%02X should have a description, but got 'Unknown error'", nrc)
 		}
 	}
 }
@@ -575,7 +575,7 @@ func BenchmarkUDSError_Error(b *testing.B) {
 	err := &UDSError{
 		ServiceID: 0x22,
 		NRC:       ServiceNotSupported,
-		Message:   "服务不支持",
+		Message:   "ServiceNotSupported",
 	}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
