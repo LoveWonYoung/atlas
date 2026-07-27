@@ -1,4 +1,4 @@
-package uds_client_lin
+package uds_client
 
 var NrcMap = map[byte]string{
 	0x00:     "PositiveResponse",

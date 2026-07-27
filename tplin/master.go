@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/LoveWonYoung/linbuskit/liniface"
+	"github.com/LoveWonYoung/atlas/liniface"
 )
 
 // Pre-defined errors for cleaner API
@@ -40,9 +40,9 @@ type LinMaster struct {
 
 // NewMaster creates and initializes a new LinMaster instance.
 // It starts the underlying transport layer's background processing.
-func NewMaster(driver liniface.Driver) *LinMaster {
+func NewMaster(driver liniface.Driver, channel ...liniface.Channel) *LinMaster {
 	// a transport layer instance is created for the master
-	transport := NewTransport(false, driver) // isSlave = false
+	transport := NewTransport(false, driver, channel...) // isSlave = false
 	transport.Run()
 
 	return &LinMaster{
@@ -51,8 +51,8 @@ func NewMaster(driver liniface.Driver) *LinMaster {
 }
 
 // NewMasterWithConfig creates a LinMaster with custom transport configuration.
-func NewMasterWithConfig(driver liniface.Driver, config TransportConfig) *LinMaster {
-	transport := NewTransportWithConfig(false, driver, config)
+func NewMasterWithConfig(driver liniface.Driver, config TransportConfig, channel ...liniface.Channel) *LinMaster {
+	transport := NewTransportWithConfig(false, driver, config, channel...)
 	transport.Run()
 	return &LinMaster{transport: transport}
 }
@@ -63,41 +63,46 @@ func (m *LinMaster) Close() {
 	m.transport.Close()
 }
 
+// StopAwaitingSlaveResponse stops requesting 0x3D when ContinuousSlavePoll is disabled.
+func (m *LinMaster) StopAwaitingSlaveResponse() {
+	m.transport.StopAwaitingSlaveResponse()
+}
+
 // waitForResponse is a helper function that waits for a specific response SID.
 // This is the Go equivalent of the blocking while-loops in the Python version.
-func (m *LinMaster) waitForResponse(expectedRsid byte, timeout time.Duration) (*LinMessage, error) {
+func (m *LinMaster) waitForResponse(expectedRsid, expectedNAD byte, timeout time.Duration) (*LinMessage, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	return m.waitForResponseWithContext(ctx, expectedRsid)
+	return m.waitForResponseWithContext(ctx, expectedRsid, expectedNAD)
 }
 
 // waitForResponseWithContext waits for a specific response SID with context support.
 // This allows for external cancellation of the wait operation.
-func (m *LinMaster) waitForResponseWithContext(ctx context.Context, expectedRsid byte) (*LinMessage, error) {
-	msg, err := m.transport.ReceiveBlocking(ctx)
-	if err != nil {
-		if errors.Is(err, context.DeadlineExceeded) {
-			return nil, ErrTimeout
-		}
-		return nil, err // ErrCanceled
-	}
-
-	if msg.SID == expectedRsid {
-		return msg, nil
-	} else if msg.SID == 0x7F { // Negative Response SID
-		if len(msg.Data) >= 2 {
-			return nil, &NegativeResponseError{
-				RequestedSID: msg.Data[0],
-				NRC:          msg.Data[1],
+func (m *LinMaster) waitForResponseWithContext(ctx context.Context, expectedRsid, expectedNAD byte) (*LinMessage, error) {
+	for {
+		msg, err := m.transport.ReceiveBlocking(ctx)
+		if err != nil {
+			if errors.Is(err, context.DeadlineExceeded) {
+				return nil, ErrTimeout
 			}
+			return nil, err // ErrCanceled
 		}
-		return nil, ErrNegativeResponse
+		if expectedNAD != BroadcastNAD && msg.NAD != expectedNAD {
+			continue
+		}
+		if msg.SID == expectedRsid {
+			return msg, nil
+		} else if msg.SID == 0x7F { // Negative Response SID
+			if len(msg.Data) >= 2 {
+				return nil, &NegativeResponseError{
+					RequestedSID: msg.Data[0],
+					NRC:          msg.Data[1],
+				}
+			}
+			return nil, ErrNegativeResponse
+		}
+		// Ignore unrelated traffic on a shared LIN channel until timeout.
 	}
-	// If we received a message with an unexpected SID, we could either:
-	// 1. Return an error (strict)
-	// 2. Loop and wait (loose, but risky if many messages)
-	// For now, lets returning an error as it's simpler and safer for a master expecting a specific response.
-	return nil, fmt.Errorf("unexpected response SID: 0x%02X (expected 0x%02X)", msg.SID, expectedRsid)
 }
 
 // AssignSlaveNad sends an Assign NAD command and waits for a response.
@@ -108,12 +113,16 @@ func (m *LinMaster) AssignSlaveNad(newNad byte, supplierID, functionID uint16, n
 	binary.LittleEndian.PutUint16(payload[2:], functionID)
 	payload[4] = newNad
 
-	m.transport.Transmit(nad, byte(sid), payload)
-
-	msg, err := m.waitForResponse(byte(sid)+0x40, timeout)
-	if err != nil {
+	if err := m.transport.Transmit(nad, byte(sid), payload); err != nil {
 		return 0, err
 	}
+
+	msg, err := m.waitForResponse(byte(sid)+0x40, nad, timeout)
+	if err != nil {
+		m.transport.StopAwaitingSlaveResponse()
+		return 0, err
+	}
+	m.transport.StopAwaitingSlaveResponse()
 	return msg.NAD, nil
 }
 
@@ -125,12 +134,16 @@ func (m *LinMaster) ReadByIdentifier(identifier byte, supplierID, functionID uin
 	binary.LittleEndian.PutUint16(payload[1:], supplierID)
 	binary.LittleEndian.PutUint16(payload[3:], functionID)
 
-	m.transport.Transmit(nad, byte(sid), payload)
-
-	msg, err := m.waitForResponse(byte(sid)+0x40, timeout)
-	if err != nil {
+	if err := m.transport.Transmit(nad, byte(sid), payload); err != nil {
 		return 0, nil, err
 	}
+
+	msg, err := m.waitForResponse(byte(sid)+0x40, nad, timeout)
+	if err != nil {
+		m.transport.StopAwaitingSlaveResponse()
+		return 0, nil, err
+	}
+	m.transport.StopAwaitingSlaveResponse()
 	return msg.NAD, msg.Data, nil
 }
 
@@ -164,9 +177,12 @@ func (m *LinMaster) GetSlaveSerialNumber(supplierID, functionID uint16, nad byte
 }
 
 // SendDiagnostic sends a raw diagnostic frame without waiting for a response.
-func (m *LinMaster) SendDiagnostic(nad, sid byte, payload []byte) {
-	m.transport.Transmit(nad, sid, payload)
+func (m *LinMaster) SendDiagnostic(nad, sid byte, payload []byte) error {
+	return m.transport.Transmit(nad, sid, payload)
 }
+
+// Errors reports asynchronous transport or driver failures.
+func (m *LinMaster) Errors() <-chan error { return m.transport.Errors() }
 
 // ReceiveDiagnostic performs a single, non-blocking check for any diagnostic message.
 func (m *LinMaster) ReceiveDiagnostic() *LinMessage {

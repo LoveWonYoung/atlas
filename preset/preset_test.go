@@ -4,7 +4,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/LoveWonYoung/canbuskit/driver"
+	"github.com/LoveWonYoung/atlas/driver"
 )
 
 type presetMockDriver struct {

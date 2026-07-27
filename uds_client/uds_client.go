@@ -8,8 +8,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/LoveWonYoung/canbuskit/driver"
-	isotp "github.com/LoveWonYoung/canbuskit/tp_layer"
+	"github.com/LoveWonYoung/atlas/driver"
+	isotp "github.com/LoveWonYoung/atlas/tp_layer"
 )
 
 // Transport 定义了 UDS 客户端所需的 ISO-TP 传输层接口

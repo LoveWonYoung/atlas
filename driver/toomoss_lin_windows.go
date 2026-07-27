@@ -11,8 +11,8 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/LoveWonYoung/canbuskit/liniface"
-	"github.com/LoveWonYoung/canbuskit/tplin"
+	"github.com/LoveWonYoung/atlas/liniface"
+	"github.com/LoveWonYoung/atlas/tplin"
 )
 
 const (

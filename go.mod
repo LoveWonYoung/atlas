@@ -1,4 +1,4 @@
-module github.com/LoveWonYoung/canbuskit
+module github.com/LoveWonYoung/atlas
 
 go 1.25.4
 

@@ -1,8 +1,8 @@
 package uds_client
 
 import (
-	"github.com/LoveWonYoung/canbuskit/driver"
-	isotp "github.com/LoveWonYoung/canbuskit/tp_layer"
+	"github.com/LoveWonYoung/atlas/driver"
+	isotp "github.com/LoveWonYoung/atlas/tp_layer"
 )
 
 func convertRXMessage(raw driver.CanFrame) (isotp.CanMessage, bool) {

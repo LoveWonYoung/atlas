@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/LoveWonYoung/linbuskit/liniface"
+	"github.com/LoveWonYoung/atlas/liniface"
 )
 
 // LinSlave represents the application layer of a LIN slave node.
@@ -30,12 +30,12 @@ type LinSlave struct {
 }
 
 // NewSlave creates and initializes a new LinSlave instance.
-func NewSlave(nad, variantID byte, supplierID, functionID uint16, serialNumber []byte, driver liniface.Driver) *LinSlave {
+func NewSlave(nad, variantID byte, supplierID, functionID uint16, serialNumber []byte, driver liniface.Driver, channel ...liniface.Channel) *LinSlave {
 	if serialNumber == nil {
 		serialNumber = []byte{0x01, 0x02, 0x03, 0x04}
 	}
 	// A transport layer instance is created for the slave
-	transport := NewTransport(true, driver) // isSlave = true
+	transport := NewTransport(true, driver, channel...) // isSlave = true
 
 	return &LinSlave{
 		nad:              nad,
@@ -78,6 +78,7 @@ func (s *LinSlave) Stop() {
 		s.cancel()
 	}
 	s.wg.Wait()
+	s.transport.Close()
 }
 
 // simulate is the core logic loop, equivalent to the Python version's method.
@@ -110,7 +111,9 @@ func (s *LinSlave) simulate() {
 		s.handleReadByIdentifier(msg)
 	case SaveConfigurationSID:
 		s.savedNad = s.nad
-		s.transport.Transmit(s.nad, msg.SID+0x40, []byte{})
+		if err := s.transport.Transmit(s.nad, msg.SID+0x40, []byte{}); err != nil {
+			log.Printf("Slave failed to queue response: %v", err)
+		}
 	case AssignNadSID:
 		s.handleAssignNad(msg)
 	// Add other SID handlers here as needed
@@ -121,7 +124,9 @@ func (s *LinSlave) simulate() {
 
 // transmitNegativeResponse is a helper to send standardized error responses.
 func (s *LinSlave) transmitNegativeResponse(requestedSID, errorCode byte) {
-	s.transport.Transmit(s.nad, 0x7F, []byte{requestedSID, errorCode})
+	if err := s.transport.Transmit(s.nad, 0x7F, []byte{requestedSID, errorCode}); err != nil {
+		log.Printf("Slave failed to queue negative response: %v", err)
+	}
 }
 
 func (s *LinSlave) matchesID(reqSupplierID, reqFunctionID uint16) bool {
@@ -160,7 +165,9 @@ func (s *LinSlave) handleReadByIdentifier(msg *LinMessage) {
 	if s.matchesID(supplierID, functionID) {
 		response := s.getIDBytes(identifier)
 		if response != nil {
-			s.transport.Transmit(s.nad, msg.SID+0x40, response)
+			if err := s.transport.Transmit(s.nad, msg.SID+0x40, response); err != nil {
+				log.Printf("Slave failed to queue response: %v", err)
+			}
 		} else {
 			s.transmitNegativeResponse(msg.SID, 0x12) // SubFunctionNotSupported
 		}
@@ -177,7 +184,9 @@ func (s *LinSlave) handleAssignNad(msg *LinMessage) {
 
 	if s.matchesID(supplierID, functionID) {
 		// Per spec, response is sent with the old NAD
-		s.transport.Transmit(s.nad, msg.SID+0x40, []byte{})
+		if err := s.transport.Transmit(s.nad, msg.SID+0x40, []byte{}); err != nil {
+			log.Printf("Slave failed to queue response: %v", err)
+		}
 		// Then the NAD is changed
 		s.nad = newNad
 		log.Printf("Slave NAD changed to 0x%X", s.nad)

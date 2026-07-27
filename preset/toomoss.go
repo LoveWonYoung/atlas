@@ -2,7 +2,7 @@
 
 package preset
 
-import "github.com/LoveWonYoung/canbuskit/driver"
+import "github.com/LoveWonYoung/atlas/driver"
 
 func NewPresetToomoss(physId, respId, funcId uint32, channel byte, canType driver.CanType) (*Preset, error) {
 	drv := driver.NewToomoss(canType, channel)

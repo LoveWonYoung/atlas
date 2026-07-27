@@ -29,7 +29,9 @@ const (
 	BroadcastFunctionID = 0xFFFF
 
 	// DefaultTxQueueSize Default configuration values
-	DefaultTxQueueSize       = 10
+	// DefaultTxQueueSize can hold the maximum 4095-byte LIN transport message
+	// (one first frame plus up to 682 consecutive frames) atomically.
+	DefaultTxQueueSize       = 683
 	DefaultRxQueueSize       = 10
 	DefaultPollInterval      = 10 * time.Millisecond
 	DefaultReadTimeout       = 10 * time.Millisecond
@@ -43,4 +45,7 @@ type TransportConfig struct {
 	PollInterval      time.Duration
 	ReadTimeout       time.Duration
 	MultiFrameTimeout time.Duration // 多帧接收超时
+	// ContinuousSlavePoll 为 true 时，Master 在空闲时也会持续请求 0x3D；
+	// 为 false（默认）时，仅在等待从节点响应或多帧接收未完成时才请求 0x3D。
+	ContinuousSlavePoll bool
 }

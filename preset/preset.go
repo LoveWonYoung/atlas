@@ -5,9 +5,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/LoveWonYoung/canbuskit/driver"
-	"github.com/LoveWonYoung/canbuskit/tp_layer"
-	"github.com/LoveWonYoung/canbuskit/uds_client"
+	"github.com/LoveWonYoung/atlas/driver"
+	"github.com/LoveWonYoung/atlas/tp_layer"
+	"github.com/LoveWonYoung/atlas/uds_client"
 )
 
 const defaultPaddingByte byte = 0xAA

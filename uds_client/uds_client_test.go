@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/LoveWonYoung/canbuskit/driver"
-	isotp "github.com/LoveWonYoung/canbuskit/tp_layer"
+	"github.com/LoveWonYoung/atlas/driver"
+	isotp "github.com/LoveWonYoung/atlas/tp_layer"
 )
 
 // ============================================================================
