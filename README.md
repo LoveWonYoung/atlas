@@ -1,35 +1,26 @@
-# atlas
+# canbuskit
 
-`atlas` 是一个面向 Go 的 CAN、CAN FD 和 LIN 总线设备与诊断库。CAN 能力来自 canbuskit，LIN 能力已从 linbuskit 合入；同一项目现在可以通过 `device.Init` 使用统一的设备初始化入口。
+`canbuskit` 是一个面向 Go 的 CAN / CAN FD 诊断工具库，提供了：
 
-项目提供：
-
-- Toomoss、TSMaster 等底层设备封装
-- CAN / CAN FD 与 LIN 的统一设备初始化入口
+- 多种底层 CAN 驱动封装
 - ISO-TP 传输层实现
-- LIN Transport Protocol 实现
-- UDS over CAN 与 UDS over LIN 客户端
-- 常见 UDS 服务封装
-- 面向刷写场景的 HEX / SREC 分块辅助能力
+- UDS 客户端
 
-项目适合做 ECU 诊断、刷写、自动化测试，以及把不同总线和硬件接入统一的 Go 接口。
+项目适合做 ECU 诊断、刷写、自动化测试，以及把不同 CAN 硬件接入统一的 Go 接口。
+
+当前硬件驱动统一支持标准 11 位 ID 的 CAN / CAN FD 数据帧；29 位扩展帧不在驱动层支持范围内。
 
 ## 模块结构
 
-仓库的主要包如下：
+仓库主要分成三层：
 
-- `device`：CAN / LIN 共用的设备初始化和生命周期入口
-- `driver`：底层 CAN / CAN FD 驱动
-- `lindriver`：底层 LIN 驱动
-- `liniface`：LIN 驱动公共接口和帧类型
+- `driver`：底层 CAN 驱动统一接口，屏蔽不同厂商设备差异
 - `tp_layer`：ISO-15765-2 传输层，实现单帧、多帧、流控、超时管理
-- `tplin`：LIN 传输层及主站、从站、模拟网络
-- `uds_client`：UDS over CAN 和 UDS over LIN 客户端
-- `services`：对常见 UDS 服务做了更高层封装
+- `uds_client`：基于 `driver + ISO-TP` 的 UDS 客户端，负责请求、超时、负响应和重试逻辑
 
-如果现成服务不够用，也可以直接调用 `UDSClient.Request(...)` 发送任意 SID。
+通过 `UDSClient.Request(...)` 可以发送任意 UDS SID。
 
-## 已支持的设备
+## 已支持的驱动
 
 ### 本地硬件驱动
 
@@ -46,72 +37,17 @@
   - Windows
   - 按 `Toomoss -> TSMaster -> PCAN -> Vector` 顺序自动选择第一个可用设备
 
-LIN 驱动：
-
-- `lindriver.NewToomoss(...)`：Windows、macOS（`darwin && cgo`）
-- `lindriver.NewTSMaster(...)`：Windows
-- `lindriver.NewMockDriver()`：所有平台，用于测试
-
-新代码建议优先使用 `device.Init(...)`，只有需要厂商专有能力时才直接构造底层驱动。
-
 ## 安装
 
 ```bash
-go get github.com/LoveWonYoung/atlas
+go get github.com/LoveWonYoung/canbuskit
 ```
-
-## 统一初始化
-
-CAN、CAN FD 和 LIN 共用一个初始化函数。返回的 `Device` 统一负责关闭底层资源。
-
-CAN FD + Toomoss：
-
-```go
-dev, err := device.Init(device.Config{
-    Bus:      device.BusCAN,
-    Provider: device.ProviderToomoss,
-    CAN: device.CANConfig{
-        Type:    driver.CANFD,
-        Channel: driver.CHANNEL1,
-    },
-})
-if err != nil {
-    log.Fatal(err)
-}
-defer dev.Close()
-
-canDriver := dev.CANDriver()
-```
-
-LIN + Toomoss：
-
-```go
-dev, err := device.Init(device.Config{
-    Bus:      device.BusLIN,
-    Provider: device.ProviderToomoss,
-    LIN: device.LINConfig{
-        Channels: []liniface.Channel{0, 1},
-        BaudRate: 19_200,
-        Mode:     device.LINMaster,
-    },
-})
-if err != nil {
-    log.Fatal(err)
-}
-defer dev.Close()
-
-linDriver := dev.LINDriver()
-client := uds_client.NewClient(linDriver, 0x01)
-defer client.Close()
-```
-
-`ProviderAuto` 在 Windows 的 CAN 模式下按 Toomoss、TSMaster、PCAN、Vector 的顺序探测。未填写 LIN 通道、波特率和模式时，默认使用通道 0、19.2 kbit/s、主站模式。
 
 ## 快速开始
 
 下面示例演示一个典型链路：
 
-`CAN Driver -> Adapter -> ISO-TP -> UDS Client -> UDS Service`
+`CAN Driver -> ISO-TP -> UDS Client`
 
 ```go
 package main
@@ -120,20 +56,15 @@ import (
 	"fmt"
 	"log"
 
-    "github.com/LoveWonYoung/atlas/driver"
-    "github.com/LoveWonYoung/atlas/services"
-    isotp "github.com/LoveWonYoung/atlas/tp_layer"
-    "github.com/LoveWonYoung/atlas/uds_client"
+	"github.com/LoveWonYoung/canbuskit/driver"
+	isotp "github.com/LoveWonYoung/canbuskit/tp_layer"
+	"github.com/LoveWonYoung/canbuskit/uds_client"
 )
 
 func main() {
 	dev := driver.NewToomoss(driver.CANFD, driver.CHANNEL1)
 
-	addr, err := isotp.NewAddress(
-		isotp.Normal11Bit,
-		isotp.WithTxID(0x7C6),
-		isotp.WithRxID(0x7C7),
-	)
+	addr, err := isotp.NewAddress(0x7C6, 0x7C7)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -144,15 +75,12 @@ func main() {
 	}
 	defer client.Close()
 
-	client.SetFDMode(true)
-
-	rdbi := services.NewReadDataByIdentifier(client)
-	resp, err := rdbi.ReadDataByIdentifier(0xF190)
+	resp, err := client.Request([]byte{0x22, 0xF1, 0x90})
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	fmt.Printf("VIN: %X\n", resp.Values[0xF190])
+	fmt.Printf("response: %X\n", resp)
 }
 ```
 
@@ -162,17 +90,61 @@ func main() {
 dev := driver.NewAutoDriver(driver.CANFD)
 ```
 
-## CAN 寻址与 ISO-TP 配置
+### 驱动配置
 
-`tp_layer` 支持多种寻址模式：
+旧构造函数默认使用通道 1、500 kbit/s 仲裁速率、2 Mbit/s 数据速率。需要自定义时，可以使用统一的 `driver.Config`：
 
-- `Normal11Bit`
-- `Normal29Bit`
-- `NormalFixed29Bit`
-- `Extended11Bit`
-- `Extended29Bit`
-- `Mixed11Bit`
-- `Mixed29Bit`
+```go
+cfg := driver.DefaultConfig(driver.CANFD, driver.CHANNEL2)
+cfg.NominalBitrate = 500_000
+cfg.DataBitrate = 4_000_000
+cfg.RxBufferSize = 4096
+cfg.PollingInterval = 500 * time.Microsecond
+
+dev := driver.NewToomossWithConfig(cfg)
+```
+
+Windows 下的其他驱动对应使用：
+
+```go
+pcan := driver.NewPCANWithConfig(cfg)
+tsmaster := driver.NewTSMasterWithConfig(cfg, driver.TC1016)
+vector := driver.NewVectorWithConfig(cfg, driver.CANOEVN1640)
+auto := driver.NewAutoDriverWithConfig(cfg)
+```
+
+对 TSMaster 而言，`cfg.Channel` 表示物理硬件通道。默认会把应用逻辑通道 CAN1 映射到设备索引 0 的该物理通道。例如只连接一个设备但使用物理 CAN4：
+
+```go
+cfg := driver.DefaultConfig(driver.CANFD, driver.CHANNEL4)
+tsmaster := driver.NewTSMasterWithConfig(cfg, driver.TC1016)
+// 映射结果：应用 CAN1 -> 设备 0 / 物理 CAN4
+```
+
+需要指定其他应用通道或第 N 个设备时，可以显式配置映射：
+
+```go
+mapping := driver.TSMasterMapping{
+	ApplicationChannel: driver.CHANNEL2,
+	HardwareIndex:      1,
+	HardwareChannel:    driver.CHANNEL4,
+}
+tsmaster := driver.NewTSMasterWithMapping(cfg, driver.TC1016, mapping)
+```
+
+`IncludeTxEcho` 默认为 `false`。抓包程序如果需要同时观察发送帧，可以显式开启；UDS 客户端始终只处理 RX 帧。
+
+`AutoDriver` 会按默认顺序探测设备，清理初始化失败或模式不匹配的候选。也可以通过 `AutoCandidate` 传入自定义顺序和设备构造参数。
+
+## 寻址与 ISO-TP 配置
+
+Lite 版只支持标准 11 位 CAN ID 的普通寻址。创建连接时直接传入发送 ID 和接收 ID：
+
+```go
+addr, err := isotp.NewAddress(0x7C6, 0x7C7)
+```
+
+`0x800` 及以上的扩展 ID 会在创建地址时被拒绝。远程帧、错误帧和发送回显不会进入 ISO-TP 接收链路。
 
 基础配置来自：
 
@@ -183,14 +155,14 @@ cfg := isotp.DefaultConfig()
 你可以按需覆盖：
 
 - `PaddingByte`
-- `TimeoutN_As / N_Bs / N_Cs`
-- `TimeoutN_Ar / N_Br / N_Cr`
+- `TimeoutN_Bs`（等待流控帧）
+- `TimeoutN_Cr`（等待连续帧）
 - `BlockSize`
 - `StMin`
 
 ## UDS 客户端能力
 
-CAN 使用 `uds_client.UDSClient`，负责：
+`uds_client.UDSClient` 负责：
 
 - 请求发送与响应接收
 - 超时管理
@@ -198,7 +170,7 @@ CAN 使用 `uds_client.UDSClient`，负责：
 - `0x78 Response Pending` 自动继续等待
 - 可重试负响应的有限重试
 - 物理地址 / 功能地址切换
-- CAN / CAN FD 切换
+- 根据驱动配置自动选择 CAN / CAN FD
 
 常用方法：
 
@@ -206,7 +178,6 @@ CAN 使用 `uds_client.UDSClient`，负责：
 - `RequestWithTimeout(payload, timeout)`
 - `RequestWithContext(ctx, payload, opts)`
 - `SendAndRecv(payload, timeout)`
-- `SetFDMode(isFD bool)`
 - `SetFunctionalAddress(addr)`
 - `UseFunctionalAddress()`
 - `UsePhysicalAddress()`
@@ -217,113 +188,11 @@ CAN 使用 `uds_client.UDSClient`，负责：
 resp, err := client.Request([]byte{0x10, 0x03})
 ```
 
-LIN 使用 `uds_client.Client`，底层连接 `tplin`：
-
-```go
-client := uds_client.NewClient(linDriver, 0x01)
-defer client.Close()
-
-responseNAD, resp, err := client.SendAndRec(
-    []byte{0x22, 0xF1, 0x89},
-    2*time.Second,
-)
-```
-
-`tplin.NewMaster`、`tplin.NewSlave` 和 `tplin.NewSimulatedLinNetwork` 也可以用于更底层的 LIN 主从通信与无硬件测试。
-
-## 已封装的 UDS 服务
-
-`services` 目录目前包含：
-
-- `ReadDataByIdentifier` (`0x22`)
-- `RoutineControl` (`0x31`)
-- `RequestDownload` (`0x34`)
-- `TransferData` (`0x36`)
-- `RequestTransferExit` (`0x37`)
-- `SecurityAccess` (`0x27`)
-
-示例：读取多个 DID
-
-```go
-rdbi := services.NewReadDataByIdentifier(client)
-
-resp, err := rdbi.ReadDataByIdentifierWithLengths(
-	map[uint16]int{
-		0xF187: 16,
-		0xF190: 17,
-	},
-	0xF187,
-	0xF190,
-)
-if err != nil {
-	log.Fatal(err)
-}
-
-fmt.Printf("DID F187: %X\n", resp.Values[0xF187])
-fmt.Printf("DID F190: %X\n", resp.Values[0xF190])
-```
-
-## 刷写流程示例
-
-仓库已经提供了刷写链路里最常见的几个步骤封装：
-
-1. `RequestDownload`
-2. `TransferData`
-3. `RequestTransferExit`
-
-同时支持把 HEX / SREC 文件解析成分段和分块。
-
-```go
-reqDownload := services.NewRequestDownload(client)
-transfer := services.NewTransferData(client)
-exit := services.NewRequestTransferExit(client)
-
-downloadResp, err := reqDownload.RequestDownload(0x00100000, 0x00002000, 4, 4)
-if err != nil {
-	log.Fatal(err)
-}
-
-fmt.Printf("ECU max block len: %d\n", downloadResp.MaxLength)
-
-_, nextSeq, err := transfer.TransferHexFile("./app.hex", 256, 1)
-if err != nil {
-	log.Fatal(err)
-}
-
-fmt.Printf("next sequence: 0x%02X\n", nextSeq)
-
-_, err = exit.RequestTransferExit(nil)
-if err != nil {
-	log.Fatal(err)
-}
-```
-
-如果你只想解析文件，不立刻发送，也可以直接使用：
-
-- `ParseHexSegments`
-- `MyHexParser`
-- `MyHexParserWithLengths`
-
-支持按扩展名或内容自动识别：
-
-- Intel HEX
-- SREC / S19 / S28 / S37
-
-## SecurityAccess 说明
-
-`services.SecurityAccess` 在不同平台行为不同：
-
-- Windows：通过 `SecKey.dll` 加载 `SecKeyCmac` 计算 key
-- 非 Windows：提供 stub，实现会返回不支持错误
-
-如果你的项目依赖 `SecurityAccess`，需要自行准备匹配 ECU 算法的 `SecKey.dll`。
-
 ## 注意事项
 
-- `driver` 的 `Write(id, fd, data)` 通过 `fd` 标志发送 CAN / CAN FD。
-- `lindriver` 实现 `liniface.Driver`；LIN 通道从 0 开始编号。
-- `device.Device` 一次只表示一种总线连接；需要 CAN 和 LIN 时分别调用 `device.Init`，并分别关闭。
-- `services` 只封装了部分常见 UDS 服务；其他服务建议直接用 `UDSClient.Request(...)`。
+- `driver` 层只提供统一的 `Write(id, fd, data)` 能力，通过 `fd` 标志在同一函数里发送 CAN / CAN-FD。
+- 驱动层只接受 `0x000-0x7FF` 的标准 11 位 CAN ID。
+- UDS 服务请求由调用方通过 `UDSClient.Request(...)` 直接组装。
 - `UDSClient.Close()` 会同时关闭后台 goroutine 和底层设备连接，使用结束后应主动调用。
 
 ## 测试

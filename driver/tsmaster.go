@@ -13,10 +13,193 @@ import (
 	"runtime"
 	"syscall"
 	"time"
+
+	// "time"
 	"unsafe"
 
 	"golang.org/x/sys/windows/registry"
 )
+
+const (
+	BUS_UNKNOWN_TYPE = iota
+	TS_TCP_DEVICE
+	XL_USB_DEVICE
+	TS_USB_DEVICE
+	PEAK_USB_DEVICE
+	KVASER_USB_DEVICE
+	ZLG_USB_DEVICE
+	ICS_USB_DEVICE
+	TS_TC1005_DEVICE
+	CANABLE_USB_DEVICE
+	TS_WIRELESS_OBD
+	TS_USB_DEVICE_EX
+	IXXAT_USB_DEVICE
+	TS_ETH_IF_DEVICE
+	TS_USB_IF_DEVICE
+	BUS_DEV_TYPE_COUNT
+)
+
+// TSMaster
+const (
+	TS_UNKNOWN_DEVICE = iota
+	TSCAN_PRO
+	TSCAN_Lite1
+	TC1001
+	TL1001
+	TC1011
+	TM5011
+	TC1002
+	TC1014
+	TSCANFD2517
+	TC1026
+	TC1016
+	TC1012
+	TC1013
+	TLog1002
+	TC1034
+	TC1018
+	GW2116
+	TC2115
+	MP1013
+	TC1113
+	TC1114
+	TP1013
+	TC1017
+	TP1018
+	TF10XX
+	TL1004_FD_4_LIN_2
+	TE1051
+	TP1051
+	TP1034
+	TTS9015
+	TP1026
+	TTS1026
+	TTS1034
+	TTS1018
+	TL1011
+	TTS1015_LiAuto
+	TTS1013_LiAuto
+	TTS1016Pro
+	TC1054Pro
+	TC1054
+	TLog1038
+	TO1013
+	TC1034Pro
+	TC1018Pro
+	TC1038Pro
+	TC1014Pro
+	TC1034ProPlus
+	TA1038
+	TC1055Pro
+	TC1056Pro
+	TC1057Pro
+	TC4016
+	GW2208
+	TLog1039
+	GW1040
+	TC3014
+	TP1014
+	TA825_4
+	TC1013HV
+	TC1052
+	TTS1017Pro
+	TLog1057
+	TC1017Pro
+	GW2202
+	GW2204
+	GW2212
+	TA821
+	TX1000
+	TC1055ProPlus
+	TC1043
+	TS_DEV_END
+)
+
+// TSMasterMap 设备编号对照表
+var TSMasterMap = map[string]int{
+	"TS_UNKNOWN_DEVICE": TS_UNKNOWN_DEVICE,
+	"TSCAN_PRO":         TSCAN_PRO,
+	"TSCAN_Lite1":       TSCAN_Lite1,
+	"TC1001":            TC1001,
+	"TL1001":            TL1001,
+	"TC1011":            TC1011,
+	"TM5011":            TM5011,
+	"TC1002":            TC1002,
+	"TC1014":            TC1014,
+	"TSCANFD2517":       TSCANFD2517,
+	"TC1026":            TC1026,
+	"TC1016":            TC1016,
+	"TC1012":            TC1012,
+	"TC1013":            TC1013,
+	"TLog1002":          TLog1002,
+	"TC1034":            TC1034,
+	"TC1018":            TC1018,
+	"GW2116":            GW2116,
+	"TC2115":            TC2115,
+	"MP1013":            MP1013,
+	"TC1113":            TC1113,
+	"TC1114":            TC1114,
+	"TP1013":            TP1013,
+	"TC1017":            TC1017,
+	"TP1018":            TP1018,
+	"TF10XX":            TF10XX,
+	"TL1004_FD_4_LIN_2": TL1004_FD_4_LIN_2,
+	"TE1051":            TE1051,
+	"TP1051":            TP1051,
+	"TP1034":            TP1034,
+	"TTS9015":           TTS9015,
+	"TP1026":            TP1026,
+	"TTS1026":           TTS1026,
+	"TTS1034":           TTS1034,
+	"TTS1018":           TTS1018,
+	"TL1011":            TL1011,
+	"TTS1015_LiAuto":    TTS1015_LiAuto,
+	"TTS1013_LiAuto":    TTS1013_LiAuto,
+	"TTS1016Pro":        TTS1016Pro,
+	"TC1054Pro":         TC1054Pro,
+	"TC1054":            TC1054,
+	"TLog1038":          TLog1038,
+	"TO1013":            TO1013,
+	"TC1034Pro":         TC1034Pro,
+	"TC1018Pro":         TC1018Pro,
+	"TC1038Pro":         TC1038Pro,
+	"TC1014Pro":         TC1014Pro,
+	"TC1034ProPlus":     TC1034ProPlus,
+	"TA1038":            TA1038,
+	"TC1055Pro":         TC1055Pro,
+	"TC1056Pro":         TC1056Pro,
+	"TC1057Pro":         TC1057Pro,
+	"TC4016":            TC4016,
+	"GW2208":            GW2208,
+	"TLog1039":          TLog1039,
+	"GW1040":            GW1040,
+	"TC3014":            TC3014,
+	"TP1014":            TP1014,
+	"TA825_4":           TA825_4,
+	"TC1013HV":          TC1013HV,
+	"TC1052":            TC1052,
+	"TTS1017Pro":        TTS1017Pro,
+	"TLog1057":          TLog1057,
+	"TC1017Pro":         TC1017Pro,
+	"GW2202":            GW2202,
+	"GW2204":            GW2204,
+	"GW2212":            GW2212,
+	"TA821":             TA821,
+	"TX1000":            TX1000,
+	"TC1055ProPlus":     TC1055ProPlus,
+	"TC1043":            TC1043,
+	"TS_DEV_END":        TS_DEV_END,
+}
+
+// deviceNameFromType 根据设备编号反查设备名称
+func deviceNameFromType(deviceType int) (string, error) {
+	for name, id := range TSMasterMap {
+		if id == deviceType && name != "TS_UNKNOWN_DEVICE" && name != "TS_DEV_END" {
+			return name, nil
+		}
+	}
+	return "", fmt.Errorf("unsupported TSMaster device type: %d", deviceType)
+}
 
 type TSMasterLoader struct {
 	DLL     *syscall.LazyDLL
@@ -117,7 +300,7 @@ func (t *TSMasterLoader) Close() error {
 
 type TLIBCAN struct {
 	FIdxChn     uint8    // 通道
-	FProperties uint8    // 属性定义：[7] 0-normal frame, 1-error frame
+	FProperties uint8    // bit0 TX, bit1 remote, bit2 extended
 	FDLC        uint8    // dlc from 0 to 8
 	FReserved   uint8    // 保留字段
 	FIdentifier int32    // ID
@@ -126,7 +309,7 @@ type TLIBCAN struct {
 }
 type TLIBCANFD struct {
 	FIdxChn       uint8 // 通道
-	FProperties   uint8 // 属性定义：[7] 0-normal frame, 1-error frame
+	FProperties   uint8 // bit0 TX, bit1 remote, bit2 extended
 	FDLC          uint8 //dlc from 0 to 15
 	FFDProperties uint8
 	FIdentifier   int32     // ID
@@ -134,47 +317,111 @@ type TLIBCANFD struct {
 	FData         [64]uint8 // 报文数据
 }
 
+const (
+	tsCANPropertyTX       = 1 << 0
+	tsCANPropertyRemote   = 1 << 1
+	tsCANPropertyExtended = 1 << 2
+)
+
+// TSMasterMapping maps one application-side logical channel to one physical
+// channel on a TSMaster hardware device. All values are zero-based.
+type TSMasterMapping struct {
+	ApplicationChannel byte
+	HardwareIndex      int
+	HardwareChannel    byte
+}
+
+func DefaultTSMasterMapping(hardwareChannel byte) TSMasterMapping {
+	return TSMasterMapping{
+		ApplicationChannel: CHANNEL1,
+		HardwareIndex:      0,
+		HardwareChannel:    hardwareChannel,
+	}
+}
+
 type TSMaster struct {
 	loader      *TSMasterLoader
 	isConnected bool
-	rxChan      chan UnifiedCANMessage
+	rxChan      chan CanFrame
 	fanout      *rxFanout
 	ctx         context.Context
 	cancel      context.CancelFunc
+	cfg         Config
+	lifecycle   driverLifecycle
 	canType     CanType
-	CANChannel  byte
-	DeviceType  int
+	// CANChannel is the physical hardware channel and is kept for backwards
+	// compatibility. Internal send/receive operations use mapping.ApplicationChannel.
+	CANChannel byte
+	mapping    TSMasterMapping
+	deviceType int
 }
 
-func NewTSMaster(cantype CanType, canChannel byte, DeviceType int) *TSMaster {
+func NewTSMaster(cantype CanType, canChannel byte, deviceType int) *TSMaster {
+	return NewTSMasterWithConfig(DefaultConfig(cantype, canChannel), deviceType)
+}
+
+func NewTSMasterWithConfig(cfg Config, deviceType int) *TSMaster {
+	return NewTSMasterWithMapping(cfg, deviceType, DefaultTSMasterMapping(cfg.Channel))
+}
+
+func NewTSMasterWithMapping(cfg Config, deviceType int, mapping TSMasterMapping) *TSMaster {
 	ctx, cancel := context.WithCancel(context.Background())
+	cfg.Channel = mapping.HardwareChannel
 	return &TSMaster{
-		rxChan:     make(chan UnifiedCANMessage, RxChannelBufferSize),
 		ctx:        ctx,
 		cancel:     cancel,
-		canType:    cantype,
-		CANChannel: canChannel,
-		DeviceType: DeviceType,
+		cfg:        cfg,
+		canType:    cfg.Mode,
+		CANChannel: mapping.HardwareChannel,
+		mapping:    mapping,
+		deviceType: deviceType,
 	}
 }
 
 func (t *TSMaster) Init() error {
+	t.lifecycle.opMu.Lock()
+	defer t.lifecycle.opMu.Unlock()
+	if t.lifecycle.isInitialized() {
+		return nil
+	}
 	fmt.Println("=== TSMaster Initializing ===")
+
+	cfg, err := normalizeConfig(t.cfg)
+	if err != nil {
+		return err
+	}
+	t.cfg = cfg
+	t.canType = cfg.Mode
+	t.CANChannel = t.mapping.HardwareChannel
+	t.cfg.Channel = t.mapping.HardwareChannel
+	if t.mapping.ApplicationChannel >= 32 {
+		return fmt.Errorf("TSMaster application channel %d out of range (0-31)", t.mapping.ApplicationChannel)
+	}
+	if t.mapping.HardwareIndex < 0 {
+		return fmt.Errorf("TSMaster hardware index must be >= 0: %d", t.mapping.HardwareIndex)
+	}
 
 	// 创建context和cancel函数
 	t.ctx, t.cancel = context.WithCancel(context.Background())
 
 	// 初始化接收通道
-	t.rxChan = make(chan UnifiedCANMessage, RxChannelBufferSize)
+	t.rxChan = make(chan CanFrame, cfg.RxBufferSize)
 	t.fanout = newRxFanout(t.ctx, t.rxChan)
 
 	cleanup := func(err error) error {
 		if t.cancel != nil {
 			t.cancel()
 		}
+		if t.loader != nil && t.isConnected {
+			_, _, _ = t.loader.GetProcAddress("tsapp_disconnect").Call()
+		}
 		if t.loader != nil {
 			t.loader.Close()
 			t.loader = nil
+		}
+		if t.fanout != nil {
+			t.fanout.Close()
+			t.fanout = nil
 		}
 		if t.rxChan != nil {
 			close(t.rxChan)
@@ -185,7 +432,6 @@ func (t *TSMaster) Init() error {
 	}
 
 	// 创建TSMaster加载器
-	var err error
 	t.loader, err = NewTSMasterLoader()
 	if err != nil {
 		return cleanup(fmt.Errorf("failed to load TSMaster DLL: %w", err))
@@ -213,49 +459,82 @@ func (t *TSMaster) Init() error {
 	if findDevice <= 0 {
 		return cleanup(errors.New("no TSMaster devices found"))
 	}
+	if t.mapping.HardwareIndex >= int(findDevice) {
+		return cleanup(fmt.Errorf("TSMaster hardware index %d out of range; found %d device(s)", t.mapping.HardwareIndex, findDevice))
+	}
 	HardwareName, _ := syscall.BytePtrFromString("Hardware")
 	r, _, _ = t.loader.GetProcAddress("tsapp_show_tsmaster_window").Call(uintptr(unsafe.Pointer(HardwareName)), uintptr(1))
 	fmt.Printf("tsapp_show_tsmaster_window: %d\n", r)
 	// 设置CAN通道数量
-	r, _, _ = t.loader.GetProcAddress("tsapp_set_can_channel_count").Call(uintptr(4))
+	channelCount := uintptr(t.mapping.ApplicationChannel) + 1
+	r, _, _ = t.loader.GetProcAddress("tsapp_set_can_channel_count").Call(channelCount)
 	fmt.Printf("Set CAN channel count result: %d\n", r)
-	var deviceType = -1
-	var deviceName_ = ""
-	for k, v := range TSMasterMap {
-		fmt.Printf("key=%s, value=%d\n", k, v)
-		if v == t.DeviceType {
-			deviceType = v
-			deviceName_ = k
-		}
+	if r != 0 {
+		return cleanup(fmt.Errorf("set CAN channel count failed: %d", r))
 	}
-	if deviceType == -1 || deviceName_ == "" {
-		return cleanup(fmt.Errorf("tsapp_set_can_channel_count failed: %d", deviceType))
+	devName, err := deviceNameFromType(t.deviceType)
+	if err != nil {
+		return cleanup(err)
 	}
-	deviceName, _ := syscall.UTF16PtrFromString(deviceName_)
-	// 设置映射
+	deviceName, _ := syscall.UTF16PtrFromString(devName)
+	// TSAPI(s32)tsapp_set_mapping_verbose(
+	// const char* AAppName,
+	// const TLIBApplicationChannelType AAppChannelType,
+	// const s32 AAppChannel,
+	// const char* AHardwareName,
+	// const TLIBBusToolDeviceType AHardwareType,
+	// const s32 AHardwareSubType,
+	// const s32 AHardwareIndex,
+	// const s32 AHardwareChannel,
+	// const bool AEnableMapping);
+	// Map the logical application channel to the selected device/channel.
 	r, _, _ = t.loader.GetProcAddress("tsapp_set_mapping_verbose").Call(
 		uintptr(unsafe.Pointer(appName)),
-		uintptr(0),
-		uintptr(0),
+		uintptr(0),                            // APP_CAN
+		uintptr(t.mapping.ApplicationChannel), // 应用逻辑通道
 		uintptr(unsafe.Pointer(deviceName)),
-		uintptr(3),
-		uintptr(deviceType),
-		uintptr(0),
-		uintptr(0),
-		uintptr(1), // True
+		uintptr(TS_USB_DEVICE),             // TS_USB_DEVICE
+		uintptr(t.deviceType),              // 设备子类型
+		uintptr(t.mapping.HardwareIndex),   // 硬件设备索引
+		uintptr(t.mapping.HardwareChannel), // 硬件物理通道
+		uintptr(1),                         // 启用映射
 	)
-	fmt.Printf("Set mapping verbose result: %d\n", r)
-	br := float32(500.0)
-	bd := float32(2000.0)
-	r, _, _ = t.loader.GetProcAddress("tsapp_configure_baudrate_canfd").Call(
-		uintptr(t.CANChannel),
-		uintptr(math.Float32bits(br)),
-		uintptr(math.Float32bits(bd)),
-		uintptr(1),
-		uintptr(0),
-		uintptr(1),
+	fmt.Printf(
+		"Set mapping verbose (%s/%d app=%d hardware=%d:%d) result: %d\n",
+		devName,
+		t.deviceType,
+		t.mapping.ApplicationChannel,
+		t.mapping.HardwareIndex,
+		t.mapping.HardwareChannel,
+		r,
 	)
-	fmt.Printf("canfd init: %d\n", r)
+	if r != 0 {
+		return cleanup(fmt.Errorf("tsapp_set_mapping_verbose failed: %d", r))
+	}
+	br := float32(t.cfg.NominalBitrate) / 1000
+	if t.canType == CANFD {
+		bd := float32(t.cfg.DataBitrate) / 1000
+		r, _, _ = t.loader.GetProcAddress("tsapp_configure_baudrate_canfd").Call(
+			uintptr(t.mapping.ApplicationChannel),
+			uintptr(math.Float32bits(br)),
+			uintptr(math.Float32bits(bd)),
+			uintptr(1),
+			uintptr(0),
+			uintptr(1),
+		)
+		fmt.Printf("CAN-FD bitrate configuration result: %d\n", r)
+	} else {
+		r, _, _ = t.loader.GetProcAddress("tsapp_configure_baudrate_can").Call(
+			uintptr(t.mapping.ApplicationChannel),
+			uintptr(math.Float32bits(br)),
+			uintptr(0),
+			uintptr(1),
+		)
+		fmt.Printf("CAN bitrate configuration result: %d\n", r)
+	}
+	if r != 0 {
+		return cleanup(fmt.Errorf("configure bitrate failed: %d", r))
+	}
 	// 连接设备
 	r, _, _ = t.loader.GetProcAddress("tsapp_connect").Call()
 	fmt.Printf("Connect result: %d\n", r)
@@ -267,20 +546,26 @@ func (t *TSMaster) Init() error {
 	// 启用接收FIFO
 	r, _, _ = t.loader.GetProcAddress("tsfifo_enable_receive_fifo").Call()
 	fmt.Printf("Enable receive FIFO result: %d\n", r)
+	if r != 0 {
+		return cleanup(fmt.Errorf("enable receive FIFO failed: %d", r))
+	}
 
+	t.lifecycle.markInitialized()
 	return nil
 }
 func (t *TSMaster) Start() {
-	if !t.isConnected {
+	t.lifecycle.opMu.Lock()
+	defer t.lifecycle.opMu.Unlock()
+	if !t.lifecycle.isInitialized() || !t.isConnected {
 		fmt.Println("TSMaster not connected, cannot start")
 		return
 	}
-	fmt.Println("TSMaster started")
-	// 这里可以启动接收线程等
-	go t.readLoop()
+	if t.lifecycle.start(t.readLoop) {
+		fmt.Println("TSMaster started")
+	}
 }
 func (t *TSMaster) readLoop() {
-	ticker := time.NewTicker(PollingInterval)
+	ticker := time.NewTicker(t.cfg.PollingInterval)
 	defer ticker.Stop()
 	var canfdMsg [MsgBufferSize]TLIBCANFD
 	for {
@@ -289,22 +574,37 @@ func (t *TSMaster) readLoop() {
 			return
 		case <-ticker.C:
 			var size = int32(MsgBufferSize)
+			rxTxMode := uintptr(0)
+			if t.cfg.IncludeTxEcho {
+				rxTxMode = 1
+			}
 			if r, _, _ := t.loader.GetProcAddress("tsfifo_receive_canfd_msgs").Call(
 				uintptr(unsafe.Pointer(&canfdMsg[0])),
 				uintptr(unsafe.Pointer(&size)),
-				uintptr(t.CANChannel),
-				uintptr(1),
+				uintptr(t.mapping.ApplicationChannel),
+				rxTxMode,
 			); r != 0 {
+				continue
+			}
+			if size < 0 || size > MsgBufferSize {
+				log.Printf("TSMaster returned invalid receive count %d", size)
 				continue
 			}
 			for i := 0; i < int(size); i++ {
 				msg := canfdMsg[i]
+				if msg.FIdentifier < 0 || msg.FIdentifier > 0x7FF {
+					continue
+				}
+				if msg.FProperties&(tsCANPropertyRemote|tsCANPropertyExtended) != 0 {
+					continue
+				}
 				actualLen := msg.FDLC
-				if actualLen == 0 {
+				if actualLen > 15 {
+					log.Printf("TSMaster returned invalid DLC %d", actualLen)
 					continue
 				}
 
-				var unifiedMsg UnifiedCANMessage
+				var unifiedMsg CanFrame
 				// 使用统一的日志函数
 				msgType := t.canType
 				if msg.FFDProperties&1 == 0 {
@@ -312,15 +612,18 @@ func (t *TSMaster) readLoop() {
 				} else {
 					msgType = CANFD
 				}
-				switch canfdMsg[i].FProperties & 1 {
+				switch canfdMsg[i].FProperties & tsCANPropertyTX {
 				case 0:
-					unifiedMsg = UnifiedCANMessage{
+					unifiedMsg = CanFrame{
 						Direction: RX, ID: uint32(msg.FIdentifier), DLC: msg.FDLC, Data: msg.FData, IsFD: msg.FFDProperties&1 == 1,
 					}
 
 					logCANMessage("RX", unifiedMsg.ID, unifiedMsg.DLC, unifiedMsg.Data[:dlcToLen(unifiedMsg.DLC)], msgType)
 				case 1:
-					unifiedMsg = UnifiedCANMessage{
+					if !t.cfg.IncludeTxEcho {
+						continue
+					}
+					unifiedMsg = CanFrame{
 						Direction: TX, ID: uint32(msg.FIdentifier), DLC: msg.FDLC, Data: msg.FData, IsFD: msg.FFDProperties&1 == 1,
 					}
 					logCANMessage("TX", unifiedMsg.ID, unifiedMsg.DLC, unifiedMsg.Data[:dlcToLen(unifiedMsg.DLC)], msgType)
@@ -336,15 +639,16 @@ func (t *TSMaster) readLoop() {
 	}
 }
 func (t *TSMaster) Stop() {
-	if t.cancel != nil {
-		t.cancel()
-	}
+	t.lifecycle.opMu.Lock()
+	defer t.lifecycle.opMu.Unlock()
+	wasInitialized := t.lifecycle.cancelAndWait(t.cancel)
 
 	if t.fanout != nil {
 		t.fanout.Close()
+		t.fanout = nil
 	}
 
-	if t.loader != nil && t.isConnected {
+	if wasInitialized && t.loader != nil && t.isConnected {
 		r, _, _ := t.loader.GetProcAddress("tsapp_disconnect").Call()
 		fmt.Printf("Disconnect result: %d\n", r)
 		t.isConnected = false
@@ -363,18 +667,17 @@ func (t *TSMaster) Stop() {
 	fmt.Println("TSMaster stopped")
 }
 func (t *TSMaster) Write(id int32, fd bool, data []byte) error {
-	if len(data) == 0 {
-		return errors.New("data length is 0")
+	t.lifecycle.opMu.Lock()
+	defer t.lifecycle.opMu.Unlock()
+	if !t.lifecycle.isInitialized() {
+		return errors.New("TSMaster driver is not initialized")
 	}
-	if !fd && len(data) > 8 {
-		return fmt.Errorf("data length %d exceeds CAN maximum of 8", len(data))
-	}
-	if fd && len(data) > 64 {
-		return fmt.Errorf("data length %d exceeds CAN-FD maximum of 64", len(data))
+	if err := validateWrite(t.cfg, id, fd, data); err != nil {
+		return err
 	}
 
 	var canfdMsg TLIBCANFD
-	canfdMsg.FIdxChn = t.CANChannel
+	canfdMsg.FIdxChn = t.mapping.ApplicationChannel
 	canfdMsg.FIdentifier = id
 	canfdMsg.FProperties = 1
 	canfdMsg.FDLC = dataLenToDlc(len(data))
@@ -393,19 +696,28 @@ func (t *TSMaster) Write(id int32, fd bool, data []byte) error {
 	}
 	return nil
 }
-func (t *TSMaster) RxChan() <-chan UnifiedCANMessage {
+func (t *TSMaster) RxChan() <-chan CanFrame {
+	t.lifecycle.opMu.Lock()
+	defer t.lifecycle.opMu.Unlock()
 	if t.fanout == nil {
 		return nil
 	}
-	return t.fanout.Subscribe(RxChannelBufferSize)
+	return t.fanout.Subscribe(t.cfg.RxBufferSize)
 }
-func (t *TSMaster) Context() context.Context {
-	if t.ctx != nil {
-		return t.ctx
-	}
-	return context.Background()
+func (t *TSMaster) IsFDMode() bool {
+	t.lifecycle.opMu.Lock()
+	defer t.lifecycle.opMu.Unlock()
+	return t.canType == CANFD
 }
 
-func (t *TSMaster) IsFDMode() bool {
-	return t.canType == CANFD
+func (t *TSMaster) Config() Config {
+	t.lifecycle.opMu.Lock()
+	defer t.lifecycle.opMu.Unlock()
+	return t.cfg
+}
+
+func (t *TSMaster) Mapping() TSMasterMapping {
+	t.lifecycle.opMu.Lock()
+	defer t.lifecycle.opMu.Unlock()
+	return t.mapping
 }

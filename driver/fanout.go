@@ -7,16 +7,18 @@ import (
 
 type rxFanout struct {
 	mu     sync.RWMutex
-	subs   map[chan UnifiedCANMessage]struct{}
+	subs   map[chan CanFrame]struct{}
 	closed bool
 	wg     sync.WaitGroup
 }
 
-func newRxFanout(ctx context.Context, source <-chan UnifiedCANMessage) *rxFanout {
+func newRxFanout(ctx context.Context, source <-chan CanFrame) *rxFanout {
 	f := &rxFanout{
-		subs: make(map[chan UnifiedCANMessage]struct{}),
+		subs: make(map[chan CanFrame]struct{}),
 	}
-	f.wg.Go(func() {
+	f.wg.Add(1)
+	go func() {
+		defer f.wg.Done()
 		for {
 			select {
 			case <-ctx.Done():
@@ -30,12 +32,12 @@ func newRxFanout(ctx context.Context, source <-chan UnifiedCANMessage) *rxFanout
 				f.dispatch(msg)
 			}
 		}
-	})
+	}()
 	return f
 }
 
-func (f *rxFanout) Subscribe(buffer int) <-chan UnifiedCANMessage {
-	ch := make(chan UnifiedCANMessage, buffer)
+func (f *rxFanout) Subscribe(buffer int) <-chan CanFrame {
+	ch := make(chan CanFrame, buffer)
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.closed {
@@ -46,7 +48,7 @@ func (f *rxFanout) Subscribe(buffer int) <-chan UnifiedCANMessage {
 	return ch
 }
 
-func (f *rxFanout) dispatch(msg UnifiedCANMessage) {
+func (f *rxFanout) dispatch(msg CanFrame) {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 	for ch := range f.subs {

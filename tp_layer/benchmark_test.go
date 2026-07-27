@@ -26,8 +26,8 @@ func BenchmarkTransport_Loopback(b *testing.B) {
 	// Multi-frame payload (100 bytes)
 	payload := make([]byte, 100)
 
-	
-	for b.Loop() {
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
 		// Send from T1
 		go t1.Send(payload)
 

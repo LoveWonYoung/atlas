@@ -3,6 +3,7 @@ package driver
 import (
 	"context"
 	"log"
+	"sync"
 )
 
 type DirectionType byte
@@ -75,13 +76,18 @@ func logCANMessage(direction string, id uint32, dlc byte, data []byte, canType C
 	log.Printf(format, direction, typeStr, id, dlc, data)
 }
 
-// UnifiedCANMessage 是一个通用的CAN/CAN-FD消息结构体，用于在channel中传递,它屏蔽了底层 CAN_MSG 和 CANFD_MSG 的差异。
-type UnifiedCANMessage struct {
+// CanFrame 是一个通用的CAN/CAN-FD消息结构体，用于在channel中传递,它屏蔽了底层 CanMsg 和 CanfdMsg 的差异。
+type CanFrame struct {
 	Direction DirectionType
 	ID        uint32
 	DLC       byte
 	Data      [64]byte // 使用64字节以兼容CAN-FD
 	IsFD      bool     // 标志位，用于区分是CAN还是CAN-FD消息
+}
+
+// DataLength returns the payload length represented by DLC.
+func (m CanFrame) DataLength() int {
+	return dlcToLen(m.DLC)
 }
 
 // CANDriver 定义了CAN/CAN-FD驱动的统一接口
@@ -90,22 +96,65 @@ type CANDriver interface {
 	Start()
 	Stop()
 	Write(id int32, fd bool, data []byte) error
-	RxChan() <-chan UnifiedCANMessage
-	Context() context.Context
-}
-
-// FDModeProvider is an optional capability implemented by drivers that can
-// expose their configured CAN/CAN-FD mode.
-type FDModeProvider interface {
+	RxChan() <-chan CanFrame
 	IsFDMode() bool
 }
 
-// DetectFDMode returns whether the provided driver reports FD mode and whether
-// the capability is available.
-func DetectFDMode(dev CANDriver) (isFD bool, ok bool) {
-	provider, ok := dev.(FDModeProvider)
-	if !ok {
-		return false, false
+// driverLifecycle serializes initialization/cleanup and makes the read loop
+// start/stop sequence idempotent.
+type driverLifecycle struct {
+	opMu        sync.Mutex
+	mu          sync.Mutex
+	readWG      sync.WaitGroup
+	initialized bool
+	running     bool
+}
+
+func (l *driverLifecycle) isInitialized() bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.initialized
+}
+
+func (l *driverLifecycle) markInitialized() {
+	l.mu.Lock()
+	l.initialized = true
+	l.mu.Unlock()
+}
+
+func (l *driverLifecycle) start(readLoop func()) bool {
+	l.mu.Lock()
+	if !l.initialized || l.running {
+		l.mu.Unlock()
+		return false
 	}
-	return provider.IsFDMode(), true
+	l.running = true
+	l.readWG.Add(1)
+	l.mu.Unlock()
+
+	go func() {
+		defer func() {
+			l.mu.Lock()
+			l.running = false
+			l.mu.Unlock()
+			l.readWG.Done()
+		}()
+		readLoop()
+	}()
+	return true
+}
+
+// cancelAndWait marks the instance stopped, calls cancel, and waits until the
+// hardware read loop is no longer executing vendor code.
+func (l *driverLifecycle) cancelAndWait(cancel context.CancelFunc) bool {
+	l.mu.Lock()
+	wasInitialized := l.initialized
+	l.initialized = false
+	l.mu.Unlock()
+
+	if cancel != nil {
+		cancel()
+	}
+	l.readWG.Wait()
+	return wasInitialized
 }
