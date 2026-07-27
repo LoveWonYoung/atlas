@@ -549,7 +549,7 @@ func (c *Toomoss) Write(id int32, fd bool, data []byte) error {
 	c.lifecycle.opMu.Lock()
 	defer c.lifecycle.opMu.Unlock()
 	if !c.lifecycle.isInitialized() {
-		return errors.New("Toomoss can_driver is not initialized")
+		return errors.New("toomoss can_driver is not initialized")
 	}
 	if err := validateWrite(c.cfg, id, fd, data); err != nil {
 		return err

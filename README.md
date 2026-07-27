@@ -1,6 +1,6 @@
-# canbuskit
+# atlas
 
-`canbuskit` 是一个面向 Go 的 CAN / CAN FD 诊断工具库，提供了：
+`atlas` 是一个面向 Go 的 CAN / CAN FD 诊断工具库，提供了：
 
 - 多种底层 CAN 驱动封装
 - ISO-TP 传输层实现
@@ -40,7 +40,7 @@
 ## 安装
 
 ```bash
-go get github.com/LoveWonYoung/canbuskit
+go get github.com/LoveWonYoung/atlas
 ```
 
 ## 快速开始
@@ -56,9 +56,9 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/LoveWonYoung/canbuskit/driver"
-	isotp "github.com/LoveWonYoung/canbuskit/tp_layer"
-	"github.com/LoveWonYoung/canbuskit/uds_client"
+	"github.com/LoveWonYoung/atlas/driver"
+	isotp "github.com/LoveWonYoung/atlas/tp_layer"
+	"github.com/LoveWonYoung/atlas/uds_client"
 )
 
 func main() {
