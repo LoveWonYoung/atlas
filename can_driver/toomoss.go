@@ -125,6 +125,7 @@ type Toomoss struct {
 	legacyCAN       bool
 	canFDInitConfig CanfdInitConfig
 	ownsDevice      bool
+	ownsUSB         bool
 }
 
 func NewToomoss(canType CanType, canChannel byte) *Toomoss {
@@ -198,10 +199,10 @@ func (c *Toomoss) Init() error {
 		return errors.New("another Toomoss can_driver instance is already using the device")
 	}
 	c.ownsDevice = true
-	opened := false
 	cleanup := func(err error) error {
-		if opened {
-			_ = UsbClose()
+		if c.ownsUSB {
+			_ = ReleaseToomossUSB()
+			c.ownsUSB = false
 		}
 		if c.ownsDevice {
 			releaseToomossSession()
@@ -210,20 +211,10 @@ func (c *Toomoss) Init() error {
 		return err
 	}
 
-	if err := ensureToomossLoaded(); err != nil {
-		return cleanup(fmt.Errorf("failed to load Toomoss DLLs: %w", err))
+	if err := AcquireToomossUSB(); err != nil {
+		return cleanup(err)
 	}
-	if ok, err := usbScan(); err != nil {
-		return cleanup(fmt.Errorf("USB scan failed: %w", err))
-	} else if !ok {
-		return cleanup(errors.New("USB scan failed: device not found"))
-	}
-	if ok, err := usbOpen(); err != nil {
-		return cleanup(fmt.Errorf("USB open failed: %w", err))
-	} else if !ok {
-		return cleanup(errors.New("USB open failed"))
-	}
-	opened = true
+	c.ownsUSB = true
 	fallback := func(fdErr error) error {
 		if err := c.fallbackToLegacyCAN(fdErr); err != nil {
 			return cleanup(err)
@@ -385,10 +376,11 @@ func (c *Toomoss) Stop() {
 		c.fanout.Close()
 		c.fanout = nil
 	}
-	if wasInitialized {
-		if err := UsbClose(); err != nil {
+	if wasInitialized && c.ownsUSB {
+		if err := ReleaseToomossUSB(); err != nil {
 			log.Printf("警告: USB关闭失败: %v", err)
 		}
+		c.ownsUSB = false
 	}
 	if c.rxChan != nil {
 		close(c.rxChan)

@@ -227,6 +227,7 @@ type ToomossLIN struct {
 	stateMu    sync.RWMutex
 	closeOnce  sync.Once
 	closed     bool
+	ownsUSB    bool
 	channels   map[liniface.Channel]struct{}
 	eventMu    sync.Mutex
 	eventChans map[liniface.Channel]chan *liniface.LinEvent
@@ -397,7 +398,8 @@ func NewToomossLIN(channel []byte, mode byte) (*ToomossLIN, error) {
 	if err := ensureLinReady(); err != nil {
 		return nil, err
 	}
-	// CAN 的 Init 也会 UsbScan/UsbOpen；已打开则复用 handle，避免重复打开报错。
+	// Reuse an existing LIN-loader handle, but remember whether this constructor
+	// opened it so Close never tears down a handle owned by another caller.
 	openedHere := false
 	if !isToomossUSBOpened() {
 		if ok := UsbScan(); !ok {
@@ -430,6 +432,7 @@ func NewToomossLIN(channel []byte, mode byte) (*ToomossLIN, error) {
 	}
 	toomossInstanceActive = true
 	return &ToomossLIN{
+		ownsUSB:    openedHere,
 		channels:   initializedChannels,
 		eventChans: make(map[liniface.Channel]chan *liniface.LinEvent),
 	}, nil
@@ -665,7 +668,7 @@ func (d *ToomossLIN) eventChannel(channel liniface.Channel) chan *liniface.LinEv
 	return eventChan
 }
 
-// Close releases the USB adapter and loaded can_driver library.
+// Close releases the USB adapter only when this instance opened it.
 func (d *ToomossLIN) Close() error {
 	if d == nil {
 		return nil
@@ -675,9 +678,12 @@ func (d *ToomossLIN) Close() error {
 		d.stateMu.Lock()
 		d.closed = true
 		d.stateMu.Unlock()
-		d.callMu.Lock()
-		closeErr = usbClose()
-		d.callMu.Unlock()
+		if d.ownsUSB {
+			d.callMu.Lock()
+			closeErr = usbClose()
+			d.callMu.Unlock()
+			d.ownsUSB = false
+		}
 		toomossInstanceMu.Lock()
 		toomossInstanceActive = false
 		toomossInstanceMu.Unlock()

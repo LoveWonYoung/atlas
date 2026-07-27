@@ -43,10 +43,10 @@ var (
 	DevHandle [10]int
 	DEVIndex  = 0
 
-	toomossMu        sync.Mutex
-	toomossSessionMu sync.Mutex
-	toomossInUse     bool
-	toomossUSBOpened bool
+	toomossMu         sync.Mutex
+	toomossSessionMu  sync.Mutex
+	toomossInUse      bool
+	toomossUSBSession sharedSession
 )
 
 func acquireToomossSession() bool {
@@ -90,7 +90,6 @@ func resetToomossState() {
 	LinExInit = 0
 	LinExMasterSync = 0
 	LinEXSlaveGetData = 0
-	toomossUSBOpened = false
 }
 
 func EnsureLinReady() error {
@@ -104,9 +103,7 @@ func EnsureLinReady() error {
 }
 
 func IsToomossUSBOpened() bool {
-	toomossSessionMu.Lock()
-	defer toomossSessionMu.Unlock()
-	return toomossUSBOpened
+	return toomossUSBSession.isOpened()
 }
 
 func ensureToomossLoaded() error {
@@ -391,10 +388,7 @@ func pathLooksToomoss(p string) bool {
 	return strings.Contains(pl, "toomoss") || strings.Contains(pl, "tcanlinpro")
 }
 
-func usbScan() (bool, error) {
-	if IsToomossUSBOpened() {
-		return true, nil
-	}
+func scanToomossUSB() (bool, error) {
 	if UsbScanDevice == 0 {
 		return false, errors.New("USB_ScanDevice not loaded")
 	}
@@ -408,6 +402,16 @@ func usbScan() (bool, error) {
 	return ret > 0, nil
 }
 
+func usbScan() (bool, error) {
+	if IsToomossUSBOpened() {
+		return true, nil
+	}
+	if err := ensureToomossLoaded(); err != nil {
+		return false, err
+	}
+	return scanToomossUSB()
+}
+
 func UsbScan() bool {
 	ok, err := usbScan()
 	if err != nil {
@@ -417,10 +421,7 @@ func UsbScan() bool {
 	return ok
 }
 
-func usbOpen() (bool, error) {
-	if IsToomossUSBOpened() {
-		return true, nil
-	}
+func openToomossUSB() (bool, error) {
 	if UsbOpenDevice == 0 {
 		return false, errors.New("USB_OpenDevice not loaded")
 	}
@@ -431,13 +432,40 @@ func usbOpen() (bool, error) {
 	if callErr != 0 {
 		return false, fmt.Errorf("USB_OpenDevice syscall failed: %w", callErr)
 	}
-	ok := stateValue >= 1
-	if ok {
-		toomossSessionMu.Lock()
-		toomossUSBOpened = true
-		toomossSessionMu.Unlock()
+	return stateValue >= 1, nil
+}
+
+// AcquireToomossUSB acquires one shared reference to the Windows Toomoss USB
+// handle. CAN and LIN may safely share the handle; only the final release
+// closes the device and unloads the DLL.
+func AcquireToomossUSB() error {
+	return toomossUSBSession.acquire(func() error {
+		if err := ensureToomossLoaded(); err != nil {
+			return err
+		}
+		ok, err := scanToomossUSB()
+		if err != nil {
+			return fmt.Errorf("USB scan failed: %w", err)
+		}
+		if !ok {
+			return errors.New("USB scan failed: device not found")
+		}
+		ok, err = openToomossUSB()
+		if err != nil {
+			return fmt.Errorf("USB open failed: %w", err)
+		}
+		if !ok {
+			return errors.New("USB open failed")
+		}
+		return nil
+	})
+}
+
+func usbOpen() (bool, error) {
+	if err := AcquireToomossUSB(); err != nil {
+		return false, err
 	}
-	return ok, nil
+	return true, nil
 }
 
 func UsbOpen() bool {
@@ -449,7 +477,7 @@ func UsbOpen() bool {
 	return ok
 }
 
-func UsbClose() error {
+func closeToomossUSB() error {
 	toomossMu.Lock()
 	defer toomossMu.Unlock()
 
@@ -474,4 +502,14 @@ func UsbClose() error {
 	}
 	resetToomossState()
 	return nil
+}
+
+// ReleaseToomossUSB releases one shared reference to the Windows Toomoss USB
+// handle. It closes the device only when no CAN or LIN owner remains.
+func ReleaseToomossUSB() error {
+	return toomossUSBSession.release(closeToomossUSB)
+}
+
+func UsbClose() error {
+	return ReleaseToomossUSB()
 }

@@ -73,6 +73,7 @@ type ToomossLIN struct {
 	stateMu    sync.RWMutex
 	closeOnce  sync.Once
 	closed     bool
+	ownsUSB    bool
 	channels   map[liniface.Channel]struct{}
 	eventMu    sync.Mutex
 	eventChans map[liniface.Channel]chan *liniface.LinEvent
@@ -98,22 +99,14 @@ func NewToomossLIN(channel []byte, mode byte) (*ToomossLIN, error) {
 	if err := can_driver.EnsureLinReady(); err != nil {
 		return nil, err
 	}
-	// CAN 的 Init 也会 UsbScan/UsbOpen；已打开则复用 handle，避免重复打开报错。
-	openedHere := false
-	if !can_driver.IsToomossUSBOpened() {
-		if ok := can_driver.UsbScan(); !ok {
-			return nil, fmt.Errorf("USB scan failed: device not found or DLL missing")
-		}
-		if ok := can_driver.UsbOpen(); !ok {
-			return nil, fmt.Errorf("USB open failed")
-		}
-		openedHere = true
+	// CAN/LIN share the same Windows USB handle. Each initialized instance holds
+	// one reference so closing either side cannot invalidate the other.
+	if err := can_driver.AcquireToomossUSB(); err != nil {
+		return nil, err
 	}
 	for _, ch := range channel {
 		if tmsInit, ret, err := syscall.SyscallN(can_driver.LinExInit, uintptr(can_driver.DevHandle[can_driver.DEVIndex]), uintptr(ch), uintptr(Bt), uintptr(mode)); tmsInit != 0 {
-			if openedHere {
-				_ = can_driver.UsbClose()
-			}
+			_ = can_driver.ReleaseToomossUSB()
 			return nil, fmt.Errorf("failed to initialize Toomoss LIN device: ret=%d, err=%v", ret, err)
 		}
 	}
@@ -125,6 +118,7 @@ func NewToomossLIN(channel []byte, mode byte) (*ToomossLIN, error) {
 	}
 	toomossInstanceActive = true
 	return &ToomossLIN{
+		ownsUSB:    true,
 		channels:   initializedChannels,
 		eventChans: make(map[liniface.Channel]chan *liniface.LinEvent),
 	}, nil
@@ -349,7 +343,8 @@ func (d *ToomossLIN) eventChannel(channel liniface.Channel) chan *liniface.LinEv
 	return eventChan
 }
 
-// Close releases the USB adapter and loaded can_driver library.
+// Close releases this LIN instance's shared USB reference. The final CAN/LIN
+// owner closes the adapter and unloads the driver library.
 func (d *ToomossLIN) Close() error {
 	if d == nil {
 		return nil
@@ -359,9 +354,12 @@ func (d *ToomossLIN) Close() error {
 		d.stateMu.Lock()
 		d.closed = true
 		d.stateMu.Unlock()
-		d.callMu.Lock()
-		closeErr = can_driver.UsbClose()
-		d.callMu.Unlock()
+		if d.ownsUSB {
+			d.callMu.Lock()
+			closeErr = can_driver.ReleaseToomossUSB()
+			d.callMu.Unlock()
+			d.ownsUSB = false
+		}
 		toomossInstanceMu.Lock()
 		toomossInstanceActive = false
 		toomossInstanceMu.Unlock()
