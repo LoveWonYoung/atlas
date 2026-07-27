@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/LoveWonYoung/atlas/driver"
+	"github.com/LoveWonYoung/atlas/can_driver"
 	isotp "github.com/LoveWonYoung/atlas/tp_layer"
 )
 
@@ -18,7 +18,7 @@ import (
 // MockCANDriver 是 CANDriver 接口的 Mock 实现
 type MockCANDriver struct {
 	mu        sync.Mutex
-	rxChan    chan driver.CanFrame
+	rxChan    chan can_driver.CanFrame
 	cancel    context.CancelFunc
 	fdMode    bool
 	writeLog  [][]byte       // 记录所有写入的数据
@@ -36,16 +36,16 @@ type MockResponse struct {
 func NewMockCANDriver() *MockCANDriver {
 	_, cancel := context.WithCancel(context.Background())
 	return &MockCANDriver{
-		rxChan: make(chan driver.CanFrame, 100),
+		rxChan: make(chan can_driver.CanFrame, 100),
 		cancel: cancel,
 	}
 }
 
-func (m *MockCANDriver) Init() error                    { return m.initErr }
-func (m *MockCANDriver) Start()                         {}
-func (m *MockCANDriver) Stop()                          { m.cancel() }
-func (m *MockCANDriver) RxChan() <-chan driver.CanFrame { return m.rxChan }
-func (m *MockCANDriver) IsFDMode() bool                 { return m.fdMode }
+func (m *MockCANDriver) Init() error                        { return m.initErr }
+func (m *MockCANDriver) Start()                             {}
+func (m *MockCANDriver) Stop()                              { m.cancel() }
+func (m *MockCANDriver) RxChan() <-chan can_driver.CanFrame { return m.rxChan }
+func (m *MockCANDriver) IsFDMode() bool                     { return m.fdMode }
 
 func (m *MockCANDriver) Write(id int32, fd bool, data []byte) error {
 	m.mu.Lock()
@@ -61,8 +61,8 @@ func (m *MockCANDriver) Write(id int32, fd bool, data []byte) error {
 			time.Sleep(resp.Delay)
 			var dataArr [64]byte
 			copy(dataArr[:], resp.Data)
-			m.rxChan <- driver.CanFrame{
-				Direction: driver.RX,
+			m.rxChan <- can_driver.CanFrame{
+				Direction: can_driver.RX,
 				ID:        0x7C7,
 				DLC:       byte(len(resp.Data)),
 				Data:      dataArr,
@@ -488,8 +488,8 @@ func TestNewUDSClient_AutoSyncFDMode(t *testing.T) {
 
 func TestUDSClientContinuesAfterFilteredTXEcho(t *testing.T) {
 	mockDriver := NewMockCANDriver()
-	mockDriver.rxChan <- driver.CanFrame{
-		Direction: driver.TX,
+	mockDriver.rxChan <- can_driver.CanFrame{
+		Direction: can_driver.TX,
 		ID:        0x700,
 		DLC:       1,
 	}

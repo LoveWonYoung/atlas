@@ -1,6 +1,6 @@
 //go:build windows
 
-package driver
+package can_driver
 
 import (
 	"errors"
@@ -93,7 +93,7 @@ func resetToomossState() {
 	toomossUSBOpened = false
 }
 
-func ensureLinReady() error {
+func EnsureLinReady() error {
 	if err := ensureToomossLoaded(); err != nil {
 		return err
 	}
@@ -103,7 +103,7 @@ func ensureLinReady() error {
 	return nil
 }
 
-func isToomossUSBOpened() bool {
+func IsToomossUSBOpened() bool {
 	toomossSessionMu.Lock()
 	defer toomossSessionMu.Unlock()
 	return toomossUSBOpened
@@ -217,7 +217,7 @@ func loadProcAddresses() error {
 
 	loadOptionalProc("LIN_EX_Init", &LinExInit)
 	loadOptionalProc("LIN_EX_MasterSync", &LinExMasterSync)
-	loadOptionalProc("LIN_EX_SlaveGetData", &LinExMasterSync)
+	loadOptionalProc("LIN_EX_SlaveGetData", &LinEXSlaveGetData)
 	if len(errs) > 0 && !toomossReady() {
 		return errors.New(strings.Join(errs, "; "))
 	}
@@ -392,7 +392,7 @@ func pathLooksToomoss(p string) bool {
 }
 
 func usbScan() (bool, error) {
-	if isToomossUSBOpened() {
+	if IsToomossUSBOpened() {
 		return true, nil
 	}
 	if UsbScanDevice == 0 {
@@ -418,7 +418,7 @@ func UsbScan() bool {
 }
 
 func usbOpen() (bool, error) {
-	if isToomossUSBOpened() {
+	if IsToomossUSBOpened() {
 		return true, nil
 	}
 	if UsbOpenDevice == 0 {
@@ -449,7 +449,7 @@ func UsbOpen() bool {
 	return ok
 }
 
-func usbClose() error {
+func UsbClose() error {
 	toomossMu.Lock()
 	defer toomossMu.Unlock()
 

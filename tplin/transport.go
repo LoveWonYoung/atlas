@@ -228,7 +228,7 @@ func (t *Transport) execute() error {
 	for {
 		event, err := t.driver.ReadEvent(readTimeout, t.channel)
 		if err != nil {
-			return fmt.Errorf("failed to read event from driver: %w", err)
+			return fmt.Errorf("failed to read event from can_driver: %w", err)
 		}
 		if event == nil {
 			break

@@ -1,6 +1,6 @@
 //go:build windows
 
-package driver
+package can_driver
 
 import (
 	"context"
@@ -194,13 +194,13 @@ func (c *Toomoss) Init() error {
 	c.legacyCAN = false
 
 	if !acquireToomossSession() {
-		return errors.New("another Toomoss driver instance is already using the device")
+		return errors.New("another Toomoss can_driver instance is already using the device")
 	}
 	c.ownsDevice = true
 	opened := false
 	cleanup := func(err error) error {
 		if opened {
-			_ = usbClose()
+			_ = UsbClose()
 		}
 		if c.ownsDevice {
 			releaseToomossSession()
@@ -379,7 +379,7 @@ func (c *Toomoss) Stop() {
 		c.fanout = nil
 	}
 	if wasInitialized {
-		if err := usbClose(); err != nil {
+		if err := UsbClose(); err != nil {
 			log.Printf("警告: USB关闭失败: %v", err)
 		}
 	}
@@ -549,7 +549,7 @@ func (c *Toomoss) Write(id int32, fd bool, data []byte) error {
 	c.lifecycle.opMu.Lock()
 	defer c.lifecycle.opMu.Unlock()
 	if !c.lifecycle.isInitialized() {
-		return errors.New("Toomoss driver is not initialized")
+		return errors.New("Toomoss can_driver is not initialized")
 	}
 	if err := validateWrite(c.cfg, id, fd, data); err != nil {
 		return err

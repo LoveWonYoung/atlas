@@ -1,6 +1,6 @@
 //go:build darwin && cgo
 
-package driver
+package lin_driver
 
 /*
 #include <dlfcn.h>
@@ -154,6 +154,7 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/LoveWonYoung/atlas/can_driver"
 	"github.com/LoveWonYoung/atlas/liniface"
 	"github.com/LoveWonYoung/atlas/tplin"
 )
@@ -377,7 +378,7 @@ func cToGoLINMsg(cMsg C.LIN_EX_MSG) LinExMsg {
 }
 
 func logLINMessage(direction string, id byte, len_ byte, cs byte, data []byte) {
-	if !printLogEnabled() {
+	if !can_driver.PrintLogEnabled() {
 		return
 	}
 	format := "%s LIN: ID=0x%02X, Len=%02d, CS=%02X, Data=% 02X"
@@ -664,7 +665,7 @@ func (d *ToomossLIN) eventChannel(channel liniface.Channel) chan *liniface.LinEv
 	return eventChan
 }
 
-// Close releases the USB adapter and loaded driver library.
+// Close releases the USB adapter and loaded can_driver library.
 func (d *ToomossLIN) Close() error {
 	if d == nil {
 		return nil

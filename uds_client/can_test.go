@@ -3,20 +3,20 @@ package uds_client
 import (
 	"testing"
 
-	"github.com/LoveWonYoung/atlas/driver"
+	"github.com/LoveWonYoung/atlas/can_driver"
 )
 
 func TestConvertRXMessageDropsTXEchoAndNonStandardID(t *testing.T) {
-	if _, ok := convertRXMessage(driver.CanFrame{
-		Direction: driver.TX,
+	if _, ok := convertRXMessage(can_driver.CanFrame{
+		Direction: can_driver.TX,
 		ID:        0x123,
 		DLC:       1,
 	}); ok {
 		t.Fatal("TX echo was passed to ISO-TP")
 	}
 
-	if _, ok := convertRXMessage(driver.CanFrame{
-		Direction: driver.RX,
+	if _, ok := convertRXMessage(can_driver.CanFrame{
+		Direction: can_driver.RX,
 		ID:        0x800,
 		DLC:       1,
 	}); ok {
@@ -25,8 +25,8 @@ func TestConvertRXMessageDropsTXEchoAndNonStandardID(t *testing.T) {
 }
 
 func TestConvertRXMessageConvertsStandardFrame(t *testing.T) {
-	raw := driver.CanFrame{
-		Direction: driver.RX,
+	raw := can_driver.CanFrame{
+		Direction: can_driver.RX,
 		ID:        0x7E8,
 		DLC:       3,
 		IsFD:      true,

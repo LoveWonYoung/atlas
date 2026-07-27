@@ -1,12 +1,12 @@
 package uds_client
 
 import (
-	"github.com/LoveWonYoung/atlas/driver"
+	"github.com/LoveWonYoung/atlas/can_driver"
 	isotp "github.com/LoveWonYoung/atlas/tp_layer"
 )
 
-func convertRXMessage(raw driver.CanFrame) (isotp.CanMessage, bool) {
-	if raw.Direction == driver.TX || raw.ID > 0x7FF {
+func convertRXMessage(raw can_driver.CanFrame) (isotp.CanMessage, bool) {
+	if raw.Direction == can_driver.TX || raw.ID > 0x7FF {
 		return isotp.CanMessage{}, false
 	}
 

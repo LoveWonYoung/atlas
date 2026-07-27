@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/LoveWonYoung/atlas/driver"
+	"github.com/LoveWonYoung/atlas/can_driver"
 	"github.com/LoveWonYoung/atlas/tp_layer"
 	"github.com/LoveWonYoung/atlas/uds_client"
 )
@@ -16,13 +16,13 @@ type Preset struct {
 	PhysId    uint32
 	RespId    uint32
 	FuncId    uint32
-	CanDevice driver.CANDriver
+	CanDevice can_driver.CANDriver
 	Client    *uds_client.UDSClient
 	readMu    sync.Mutex
-	rxChan    <-chan driver.CanFrame
+	rxChan    <-chan can_driver.CanFrame
 }
 
-func newPreset(drv driver.CANDriver, physId, respId, funcId uint32) (*Preset, error) {
+func newPreset(drv can_driver.CANDriver, physId, respId, funcId uint32) (*Preset, error) {
 	physAddr, err := tp_layer.NewAddress(physId, respId)
 	if err != nil {
 		return nil, fmt.Errorf("build physical address: %w", err)
@@ -72,7 +72,7 @@ func (p *Preset) Write(id int32, fd bool, data []byte) error {
 	return p.CanDevice.Write(id, fd, data)
 }
 
-func (p *Preset) Read() <-chan driver.CanFrame {
+func (p *Preset) Read() <-chan can_driver.CanFrame {
 	if p == nil || p.CanDevice == nil {
 		return nil
 	}

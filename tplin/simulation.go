@@ -111,7 +111,7 @@ func (n *SimulatedLinNetwork) scheduleSlaveResponse(linEvent *liniface.LinEvent)
 
 // --- Driver factory methods ---
 
-// GetMasterDriver creates and returns a driver for the master node.
+// GetMasterDriver creates and returns a can_driver for the master node.
 func (n *SimulatedLinNetwork) GetMasterDriver() liniface.Driver {
 	n.mu.Lock()
 	defer n.mu.Unlock()
@@ -122,7 +122,7 @@ func (n *SimulatedLinNetwork) GetMasterDriver() liniface.Driver {
 	return n.masterDriver
 }
 
-// CreateSlaveDriver creates and returns a new driver for a slave node.
+// CreateSlaveDriver creates and returns a new can_driver for a slave node.
 func (n *SimulatedLinNetwork) CreateSlaveDriver() liniface.Driver {
 	n.mu.Lock()
 	defer n.mu.Unlock()

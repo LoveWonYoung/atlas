@@ -6,7 +6,7 @@ import (
 )
 
 var (
-	ErrDriverClosed   = errors.New("LIN driver is closed")
+	ErrDriverClosed   = errors.New("LIN can_driver is closed")
 	ErrInvalidChannel = errors.New("LIN channel is not initialized")
 )
 

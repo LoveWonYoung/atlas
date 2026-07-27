@@ -1,6 +1,6 @@
 //go:build windows
 
-package driver
+package can_driver
 
 import (
 	"bytes"
@@ -171,14 +171,14 @@ func (p *PCAN) Start() {
 	}
 	p.drainInitialBuffer()
 	if p.lifecycle.start(p.readLoop) {
-		log.Println("PCAN driver started...")
+		log.Println("PCAN can_driver started...")
 	}
 }
 
 func (p *PCAN) Stop() {
 	p.lifecycle.opMu.Lock()
 	defer p.lifecycle.opMu.Unlock()
-	log.Println("Stopping PCAN driver...")
+	log.Println("Stopping PCAN can_driver...")
 	wasInitialized := p.lifecycle.cancelAndWait(p.cancel)
 	if p.fanout != nil {
 		p.fanout.Close()
@@ -197,7 +197,7 @@ func (p *PCAN) Write(id int32, fd bool, data []byte) error {
 	p.lifecycle.opMu.Lock()
 	defer p.lifecycle.opMu.Unlock()
 	if !p.lifecycle.isInitialized() {
-		return errors.New("PCAN driver is not initialized")
+		return errors.New("PCAN can_driver is not initialized")
 	}
 	if err := validateWrite(p.cfg, id, fd, data); err != nil {
 		return err

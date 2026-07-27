@@ -1,6 +1,6 @@
 //go:build windows
 
-package driver
+package lin_driver
 
 import (
 	"errors"
@@ -11,6 +11,7 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/LoveWonYoung/atlas/can_driver"
 	"github.com/LoveWonYoung/atlas/liniface"
 	"github.com/LoveWonYoung/atlas/tplin"
 )
@@ -78,7 +79,7 @@ type ToomossLIN struct {
 }
 
 func logLINMessage(direction string, id byte, len_ byte, cs byte, data []byte) {
-	if !printLogEnabled() {
+	if !can_driver.PrintLogEnabled() {
 		return
 	}
 	format := "%s LIN: ID=0x%02X, Len=%02d, CS=%02X, Data=% 02X"
@@ -94,24 +95,24 @@ func NewToomossLIN(channel []byte, mode byte) (*ToomossLIN, error) {
 	if len(channel) == 0 {
 		return nil, errors.New("at least one LIN channel is required")
 	}
-	if err := ensureLinReady(); err != nil {
+	if err := can_driver.EnsureLinReady(); err != nil {
 		return nil, err
 	}
 	// CAN 的 Init 也会 UsbScan/UsbOpen；已打开则复用 handle，避免重复打开报错。
 	openedHere := false
-	if !isToomossUSBOpened() {
-		if ok := UsbScan(); !ok {
+	if !can_driver.IsToomossUSBOpened() {
+		if ok := can_driver.UsbScan(); !ok {
 			return nil, fmt.Errorf("USB scan failed: device not found or DLL missing")
 		}
-		if ok := UsbOpen(); !ok {
+		if ok := can_driver.UsbOpen(); !ok {
 			return nil, fmt.Errorf("USB open failed")
 		}
 		openedHere = true
 	}
 	for _, ch := range channel {
-		if tmsInit, ret, err := syscall.SyscallN(LinExInit, uintptr(DevHandle[DEVIndex]), uintptr(ch), uintptr(Bt), uintptr(mode)); tmsInit != 0 {
+		if tmsInit, ret, err := syscall.SyscallN(can_driver.LinExInit, uintptr(can_driver.DevHandle[can_driver.DEVIndex]), uintptr(ch), uintptr(Bt), uintptr(mode)); tmsInit != 0 {
 			if openedHere {
-				_ = usbClose()
+				_ = can_driver.UsbClose()
 			}
 			return nil, fmt.Errorf("failed to initialize Toomoss LIN device: ret=%d, err=%v", ret, err)
 		}
@@ -142,8 +143,8 @@ func (d *ToomossLIN) LinMasterSync(msg, outMsg []LinExMsg, channel byte) (uintpt
 		return 0, err
 	}
 	ret, _, err := syscall.SyscallN(
-		LinExMasterSync,
-		uintptr(DevHandle[DEVIndex]),
+		can_driver.LinExMasterSync,
+		uintptr(can_driver.DevHandle[can_driver.DEVIndex]),
 		uintptr(channel),
 		uintptr(unsafe.Pointer(&msg[0])),
 		uintptr(unsafe.Pointer(&outMsg[0])),
@@ -348,7 +349,7 @@ func (d *ToomossLIN) eventChannel(channel liniface.Channel) chan *liniface.LinEv
 	return eventChan
 }
 
-// Close releases the USB adapter and loaded driver library.
+// Close releases the USB adapter and loaded can_driver library.
 func (d *ToomossLIN) Close() error {
 	if d == nil {
 		return nil
@@ -359,7 +360,7 @@ func (d *ToomossLIN) Close() error {
 		d.closed = true
 		d.stateMu.Unlock()
 		d.callMu.Lock()
-		closeErr = usbClose()
+		closeErr = can_driver.UsbClose()
 		d.callMu.Unlock()
 		toomossInstanceMu.Lock()
 		toomossInstanceActive = false
@@ -382,7 +383,7 @@ func (d *ToomossLIN) LinBreak(channel byte) error {
 const linExSlaveGetDataMaxFrames = 512
 
 func (d *ToomossLIN) LinExSlaveGetData(channel byte) ([]LinExMsg, error) {
-	if LinEXSlaveGetData == 0 {
+	if can_driver.LinEXSlaveGetData == 0 {
 		return nil, errors.New("LIN_EX_SlaveGetData not loaded")
 	}
 
@@ -393,8 +394,8 @@ func (d *ToomossLIN) LinExSlaveGetData(channel byte) ([]LinExMsg, error) {
 		return nil, err
 	}
 	ret, _, callErr := syscall.SyscallN(
-		LinEXSlaveGetData,
-		uintptr(DevHandle[DEVIndex]),
+		can_driver.LinEXSlaveGetData,
+		uintptr(can_driver.DevHandle[can_driver.DEVIndex]),
 		uintptr(channel),
 		uintptr(unsafe.Pointer(&linMsgs[0])),
 	)

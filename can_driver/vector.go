@@ -1,6 +1,6 @@
 //go:build windows
 
-package driver
+package can_driver
 
 import (
 	"context"
@@ -249,7 +249,7 @@ func (v *Vector) Init() error {
 	}
 
 	v.lifecycle.markInitialized()
-	log.Println("Vector driver initialized successfully.")
+	log.Println("Vector can_driver initialized successfully.")
 	return nil
 }
 
@@ -261,7 +261,7 @@ func (v *Vector) Start() {
 		return
 	}
 	if v.lifecycle.start(v.readLoop) {
-		log.Println("Vector driver started")
+		log.Println("Vector can_driver started")
 	}
 }
 
@@ -296,7 +296,7 @@ func (v *Vector) Write(id int32, fd bool, data []byte) error {
 	v.lifecycle.opMu.Lock()
 	defer v.lifecycle.opMu.Unlock()
 	if !v.lifecycle.isInitialized() {
-		return errors.New("Vector driver is not initialized")
+		return errors.New("Vector can_driver is not initialized")
 	}
 	if err := validateWrite(v.cfg, id, fd, data); err != nil {
 		return err

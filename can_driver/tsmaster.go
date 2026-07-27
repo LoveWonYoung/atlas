@@ -1,6 +1,6 @@
 //go:build windows
 
-package driver
+package can_driver
 
 import (
 	"context"
@@ -670,7 +670,7 @@ func (t *TSMaster) Write(id int32, fd bool, data []byte) error {
 	t.lifecycle.opMu.Lock()
 	defer t.lifecycle.opMu.Unlock()
 	if !t.lifecycle.isInitialized() {
-		return errors.New("TSMaster driver is not initialized")
+		return errors.New("TSMaster can_driver is not initialized")
 	}
 	if err := validateWrite(t.cfg, id, fd, data); err != nil {
 		return err

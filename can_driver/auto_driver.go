@@ -1,6 +1,6 @@
 //go:build windows
 
-package driver
+package can_driver
 
 import (
 	"errors"
@@ -28,7 +28,7 @@ func DefaultAutoCandidates() []AutoCandidate {
 	}
 }
 
-// AutoDriver selects the first available, mode-compatible CAN device driver.
+// AutoDriver selects the first available, mode-compatible CAN device can_driver.
 type AutoDriver struct {
 	canType      CanType
 	cfg          Config
@@ -42,7 +42,7 @@ func NewAutoDriver(canType CanType) *AutoDriver {
 	return NewAutoDriverWithConfig(DefaultConfig(canType, CHANNEL1))
 }
 
-// NewAutoDriverWithConfig creates an automatic driver selector. If no
+// NewAutoDriverWithConfig creates an automatic can_driver selector. If no
 // candidates are supplied, DefaultAutoCandidates is used.
 func NewAutoDriverWithConfig(cfg Config, candidates ...AutoCandidate) *AutoDriver {
 	if len(candidates) == 0 {
@@ -77,12 +77,12 @@ func (a *AutoDriver) Init() error {
 		}
 		dev := candidate.New(cfg)
 		if dev == nil {
-			errs = append(errs, fmt.Sprintf("%s: candidate returned nil driver", strings.ToLower(candidate.Name)))
+			errs = append(errs, fmt.Sprintf("%s: candidate returned nil can_driver", strings.ToLower(candidate.Name)))
 			continue
 		}
 		if err := dev.Init(); err != nil {
 			dev.Stop()
-			log.Printf("Auto driver: %s init failed: %v", candidate.Name, err)
+			log.Printf("Auto can_driver: %s init failed: %v", candidate.Name, err)
 			errs = append(errs, fmt.Sprintf("%s: %v", strings.ToLower(candidate.Name), err))
 			continue
 		}
@@ -91,13 +91,13 @@ func (a *AutoDriver) Init() error {
 		if isFD != wantFD {
 			dev.Stop()
 			err := fmt.Errorf("initialized in incompatible mode (want CAN-FD=%t, got CAN-FD=%t)", wantFD, isFD)
-			log.Printf("Auto driver: %s rejected: %v", candidate.Name, err)
+			log.Printf("Auto can_driver: %s rejected: %v", candidate.Name, err)
 			errs = append(errs, fmt.Sprintf("%s: %v", strings.ToLower(candidate.Name), err))
 			continue
 		}
 		a.driver = dev
 		a.selectedName = candidate.Name
-		log.Printf("Auto driver selected: %s", candidate.Name)
+		log.Printf("Auto can_driver selected: %s", candidate.Name)
 		return nil
 	}
 
@@ -109,7 +109,7 @@ func (a *AutoDriver) Start() {
 		drv.Start()
 		return
 	}
-	log.Println("Auto driver start called before init")
+	log.Println("Auto can_driver start called before init")
 }
 
 func (a *AutoDriver) Stop() {
@@ -127,7 +127,7 @@ func (a *AutoDriver) Write(id int32, fd bool, data []byte) error {
 	if drv := a.getDriver(); drv != nil {
 		return drv.Write(id, fd, data)
 	}
-	return errors.New("driver not initialized")
+	return errors.New("can_driver not initialized")
 }
 
 func (a *AutoDriver) RxChan() <-chan CanFrame {

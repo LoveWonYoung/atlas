@@ -46,7 +46,7 @@
 ```bash
 go test ./...
 go test ./tp_layer ./uds_client ./tplin ./uds_client_lin ./preset ./liniface
-go test ./driver -tags=windows   # 仅在 Windows 上有意义
+go test ./can_driver -tags=windows   # 仅在 Windows 上有意义
 ```
 
 Darwin Toomoss 需要 `CGO_ENABLED=1` 且本机有 TCANLINPro 的 dylib。

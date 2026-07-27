@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/LoveWonYoung/atlas/driver"
+	"github.com/LoveWonYoung/atlas/can_driver"
 	isotp "github.com/LoveWonYoung/atlas/tp_layer"
 )
 
@@ -235,7 +235,7 @@ func getNRCDescription(nrc byte) string {
 // UDSClient 是一个高级客户端，封装了所有初始化和通信的复杂性
 type UDSClient struct {
 	stack     Transport // 使用接口而非具体结构体
-	driver    driver.CANDriver
+	driver    can_driver.CANDriver
 	cancel    context.CancelFunc // 用于控制所有后台goroutine的生命周期
 	ctx       context.Context    // 客户端生命周期 context
 	txErrChan chan error
@@ -245,12 +245,12 @@ type UDSClient struct {
 }
 
 // NewUDSClient 是新的构造函数，负责完成所有组件的初始化和连接。
-func NewUDSClient(dev driver.CANDriver, addr *isotp.Address, cfg isotp.Config) (*UDSClient, error) {
+func NewUDSClient(dev can_driver.CANDriver, addr *isotp.Address, cfg isotp.Config) (*UDSClient, error) {
 	if err := addr.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid ISO-TP address: %w", err)
 	}
 	if dev == nil {
-		return nil, errors.New("CAN driver instance cannot be nil")
+		return nil, errors.New("CAN can_driver instance cannot be nil")
 	}
 	if err := dev.Init(); err != nil {
 		return nil, fmt.Errorf("failed to initialize CAN device: %w", err)
@@ -264,7 +264,7 @@ func NewUDSClient(dev driver.CANDriver, addr *isotp.Address, cfg isotp.Config) (
 }
 
 // newUDSClient 内部构造函数，支持依赖注入
-func newUDSClient(dev driver.CANDriver, stack Transport) *UDSClient {
+func newUDSClient(dev can_driver.CANDriver, stack Transport) *UDSClient {
 	// 3. 创建用于goroutine生命周期管理的context
 	ctx, cancel := context.WithCancel(context.Background())
 	txErrChan := make(chan error, 16)

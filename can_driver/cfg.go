@@ -1,4 +1,4 @@
-package driver
+package can_driver
 
 import (
 	"fmt"
@@ -10,7 +10,7 @@ var printLog atomic.Bool
 
 // Config contains settings shared by all CAN hardware backends.
 //
-// The driver package intentionally supports standard (11-bit) CAN and CAN-FD
+// The can_driver package intentionally supports standard (11-bit) CAN and CAN-FD
 // frames only. Vendor-specific device selection remains on the corresponding
 // constructor (for example Vector deviceType).
 type Config struct {
@@ -77,7 +77,7 @@ func validateWrite(cfg Config, id int32, fd bool, data []byte) error {
 		return fmt.Errorf("standard CAN ID 0x%X out of range (0x000-0x7FF)", id)
 	}
 	if fd && cfg.Mode != CANFD {
-		return fmt.Errorf("driver is configured for classic CAN")
+		return fmt.Errorf("can_driver is configured for classic CAN")
 	}
 	if !fd && len(data) > 8 {
 		return fmt.Errorf("data length %d exceeds CAN maximum of 8", len(data))
@@ -92,6 +92,6 @@ func SetPrintLog(b bool) {
 	printLog.Store(b)
 }
 
-func printLogEnabled() bool {
+func PrintLogEnabled() bool {
 	return printLog.Load()
 }

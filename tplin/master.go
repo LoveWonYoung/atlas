@@ -181,7 +181,7 @@ func (m *LinMaster) SendDiagnostic(nad, sid byte, payload []byte) error {
 	return m.transport.Transmit(nad, sid, payload)
 }
 
-// Errors reports asynchronous transport or driver failures.
+// Errors reports asynchronous transport or can_driver failures.
 func (m *LinMaster) Errors() <-chan error { return m.transport.Errors() }
 
 // ReceiveDiagnostic performs a single, non-blocking check for any diagnostic message.

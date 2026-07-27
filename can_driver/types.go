@@ -1,4 +1,4 @@
-package driver
+package can_driver
 
 import "time"
 

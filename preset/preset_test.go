@@ -4,18 +4,18 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/LoveWonYoung/atlas/driver"
+	"github.com/LoveWonYoung/atlas/can_driver"
 )
 
 type presetMockDriver struct {
 	mu      sync.Mutex
-	rxChan  chan driver.CanFrame
+	rxChan  chan can_driver.CanFrame
 	rxCalls int
 }
 
 func newPresetMockDriver() *presetMockDriver {
 	return &presetMockDriver{
-		rxChan: make(chan driver.CanFrame, 1),
+		rxChan: make(chan can_driver.CanFrame, 1),
 	}
 }
 
@@ -26,7 +26,7 @@ func (m *presetMockDriver) Write(id int32, fd bool, data []byte) error {
 	return nil
 }
 
-func (m *presetMockDriver) RxChan() <-chan driver.CanFrame {
+func (m *presetMockDriver) RxChan() <-chan can_driver.CanFrame {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.rxCalls++

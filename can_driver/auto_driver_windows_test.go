@@ -1,6 +1,6 @@
 //go:build windows
 
-package driver
+package can_driver
 
 import (
 	"errors"
@@ -50,7 +50,7 @@ func TestAutoDriverCleansFailuresAndRejectsModeMismatch(t *testing.T) {
 
 	auto.Stop()
 	if !selected.stopped {
-		t.Fatal("selected driver was not stopped")
+		t.Fatal("selected can_driver was not stopped")
 	}
 	if auto.SelectedName() != "" {
 		t.Fatal("selected name was not cleared on Stop")
