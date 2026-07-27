@@ -340,6 +340,7 @@ func DefaultTSMasterMapping(hardwareChannel byte) TSMasterMapping {
 }
 
 type TSMaster struct {
+	driverObservability
 	loader      *TSMasterLoader
 	isConnected bool
 	rxChan      chan CanFrame
@@ -406,7 +407,7 @@ func (t *TSMaster) Init() error {
 
 	// 初始化接收通道
 	t.rxChan = make(chan CanFrame, cfg.RxBufferSize)
-	t.fanout = newRxFanout(t.ctx, t.rxChan)
+	t.fanout = newRxFanout(t.ctx, t.rxChan, t.resetTelemetry())
 
 	cleanup := func(err error) error {
 		if t.cancel != nil {
@@ -427,6 +428,7 @@ func (t *TSMaster) Init() error {
 			close(t.rxChan)
 			t.rxChan = nil
 		}
+		t.closeTelemetry()
 		t.isConnected = false
 		return err
 	}
@@ -554,15 +556,21 @@ func (t *TSMaster) Init() error {
 	return nil
 }
 func (t *TSMaster) Start() {
+	if err := t.StartWithError(); err != nil {
+		log.Printf("TSMaster start failed: %v", err)
+	}
+}
+
+func (t *TSMaster) StartWithError() error {
 	t.lifecycle.opMu.Lock()
 	defer t.lifecycle.opMu.Unlock()
 	if !t.lifecycle.isInitialized() || !t.isConnected {
-		fmt.Println("TSMaster not connected, cannot start")
-		return
+		return fmt.Errorf("%w: TSMaster", ErrDriverNotInitialized)
 	}
 	if t.lifecycle.start(t.readLoop) {
 		fmt.Println("TSMaster started")
 	}
+	return nil
 }
 func (t *TSMaster) readLoop() {
 	ticker := time.NewTicker(t.cfg.PollingInterval)
@@ -629,11 +637,7 @@ func (t *TSMaster) readLoop() {
 					logCANMessage("TX", unifiedMsg.ID, unifiedMsg.DLC, unifiedMsg.Data[:dlcToLen(unifiedMsg.DLC)], msgType)
 				}
 
-				select {
-				case t.rxChan <- unifiedMsg:
-				default:
-					log.Println("警告: 驱动接收channel(FD)已满，消息被丢弃")
-				}
+				t.publishRx(t.ctx, t.rxChan, unifiedMsg)
 			}
 		}
 	}
@@ -663,6 +667,7 @@ func (t *TSMaster) Stop() {
 		close(t.rxChan)
 		t.rxChan = nil
 	}
+	t.closeTelemetry()
 
 	fmt.Println("TSMaster stopped")
 }
@@ -702,7 +707,17 @@ func (t *TSMaster) RxChan() <-chan CanFrame {
 	if t.fanout == nil {
 		return nil
 	}
-	return t.fanout.Subscribe(t.cfg.RxBufferSize)
+	ch, _ := t.fanout.Subscribe(t.cfg.RxBufferSize)
+	return ch
+}
+
+func (t *TSMaster) SubscribeRx(buffer int) (<-chan CanFrame, func()) {
+	t.lifecycle.opMu.Lock()
+	defer t.lifecycle.opMu.Unlock()
+	if t.fanout == nil {
+		return nil, func() {}
+	}
+	return t.fanout.Subscribe(buffer)
 }
 func (t *TSMaster) IsFDMode() bool {
 	t.lifecycle.opMu.Lock()

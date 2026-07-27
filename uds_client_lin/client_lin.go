@@ -124,10 +124,7 @@ func (c *Client) sendAndRec(ctx context.Context, nad byte, payload []byte) (byte
 	// 无论成功/失败/超时，结束本次会话后停止空闲 0x3D 轮询（ContinuousSlavePoll=false 时生效）。
 	defer c.master.StopAwaitingSlaveResponse()
 
-	// 3. 轮询等待响应，支持超时/NRC/响应挂起处理。
-	ticker := time.NewTicker(2 * time.Millisecond)
-	defer ticker.Stop()
-
+	// 3. 事件驱动等待响应，支持超时/NRC/响应挂起处理。
 	for {
 		select {
 		case <-ctx.Done():
@@ -142,8 +139,10 @@ func (c *Client) sendAndRec(ctx context.Context, nad byte, payload []byte) (byte
 			if err != nil {
 				return 0, nil, fmt.Errorf("LIN传输失败: %w", err)
 			}
-		case <-ticker.C:
-			msg := c.master.ReceiveDiagnostic()
+		case msg, ok := <-c.master.ReceiveDiagnosticChan():
+			if !ok {
+				return 0, nil, tplin.ErrTransportClosed
+			}
 			if msg == nil {
 				continue
 			}

@@ -314,6 +314,11 @@ func (t *Transport) Receive() *LinMessage {
 	}
 }
 
+// ReceiveChan exposes completed diagnostic messages for event-driven clients.
+func (t *Transport) ReceiveChan() <-chan *LinMessage {
+	return t.rxQueue
+}
+
 // ReceiveBlocking waits for a message or context cancellation.
 func (t *Transport) ReceiveBlocking(ctx context.Context) (*LinMessage, error) {
 	select {

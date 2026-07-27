@@ -1,12 +1,17 @@
 package tp_layer
 
 import (
+	"context"
 	"errors"
 	"fmt"
 )
 
 // ProcessRx Modified to take txChan to allow sending FlowControl frames directly
 func (t *Transport) ProcessRx(msg CanMessage, txChan chan<- CanMessage) {
+	t.processRx(context.Background(), msg, txChan)
+}
+
+func (t *Transport) processRx(ctx context.Context, msg CanMessage, txChan chan<- CanMessage) {
 	if !t.address.IsForMe(&msg) {
 		return
 	}
@@ -29,10 +34,10 @@ func (t *Transport) ProcessRx(msg CanMessage, txChan chan<- CanMessage) {
 		t.handleRxSingleFrame(f)
 
 	case *FirstFrame:
-		t.handleRxFirstFrame(f, txChan)
+		t.handleRxFirstFrame(ctx, f, txChan)
 
 	case *ConsecutiveFrame:
-		t.handleRxConsecutiveFrame(f, txChan)
+		t.handleRxConsecutiveFrame(ctx, f, txChan)
 	}
 }
 
@@ -44,11 +49,11 @@ func (t *Transport) handleRxSingleFrame(f *SingleFrame) {
 	select {
 	case t.rxDataChan <- f.Data:
 	default:
-		fmt.Println("Rx Buffer Full, dropping frame")
+		t.fireError(ErrReceiveQueueFull)
 	}
 }
 
-func (t *Transport) handleRxFirstFrame(f *FirstFrame, txChan chan<- CanMessage) {
+func (t *Transport) handleRxFirstFrame(ctx context.Context, f *FirstFrame, txChan chan<- CanMessage) {
 	if t.rxState != StateIdle {
 		t.fireError(errors.New("警告：在多帧接收过程中被一个新首帧打断"))
 	}
@@ -62,18 +67,18 @@ func (t *Transport) handleRxFirstFrame(f *FirstFrame, txChan chan<- CanMessage) 
 		select {
 		case t.rxDataChan <- t.rxBuffer:
 		default:
-			fmt.Println("Rx Buffer Full, dropping frame")
+			t.fireError(ErrReceiveQueueFull)
 		}
 		t.stopReceiving()
 	} else {
 		t.rxState = StateWaitCF
 		t.rxSeqNum = 1
-		t.sendFlowControl(FlowStatusContinueToSend, txChan)
+		t.sendFlowControl(ctx, FlowStatusContinueToSend, txChan)
 		t.resetRxTimer()
 	}
 }
 
-func (t *Transport) handleRxConsecutiveFrame(f *ConsecutiveFrame, txChan chan<- CanMessage) {
+func (t *Transport) handleRxConsecutiveFrame(ctx context.Context, f *ConsecutiveFrame, txChan chan<- CanMessage) {
 	if t.rxState != StateWaitCF {
 		// Ignore unexpected CF
 		return
@@ -101,14 +106,14 @@ func (t *Transport) handleRxConsecutiveFrame(f *ConsecutiveFrame, txChan chan<- 
 		select {
 		case t.rxDataChan <- completedData:
 		default:
-			fmt.Println("Rx Buffer Full, dropping frame")
+			t.fireError(ErrReceiveQueueFull)
 		}
 		t.stopReceiving()
 	} else {
 		t.rxBlockCounter++
 		if t.config.BlockSize > 0 && t.rxBlockCounter >= t.config.BlockSize {
 			t.rxBlockCounter = 0
-			t.sendFlowControl(FlowStatusContinueToSend, txChan)
+			t.sendFlowControl(ctx, FlowStatusContinueToSend, txChan)
 			t.resetRxTimer()
 		}
 	}
@@ -124,11 +129,10 @@ func (t *Transport) resetRxTimer() {
 	t.timerRxCF.Reset(t.config.TimeoutN_Cr)
 }
 
-func (t *Transport) sendFlowControl(status FlowStatus, txChan chan<- CanMessage) {
+func (t *Transport) sendFlowControl(ctx context.Context, status FlowStatus, txChan chan<- CanMessage) {
 	payload := createFlowControlPayload(status, t.config.BlockSize, t.config.StMin)
 	msg := t.makeTxMsgWithAddr(t.address, payload)
-	select {
-	case txChan <- msg:
-	default:
+	if !sendCanMessage(ctx, txChan, msg) {
+		t.fireError(ctx.Err())
 	}
 }

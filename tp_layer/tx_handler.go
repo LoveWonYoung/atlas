@@ -1,6 +1,7 @@
 package tp_layer
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"time"
@@ -8,7 +9,7 @@ import (
 
 // initiateTx starts the transmission of a new message.
 // It is called when data arrives on txDataChan and state is Idle.
-func (t *Transport) initiateTx(payload []byte, txChan chan<- CanMessage) {
+func (t *Transport) initiateTx(ctx context.Context, payload []byte, txChan chan<- CanMessage) {
 	t.txBuffer = payload
 	t.txFrameLen = len(payload)
 	maxDataLength := t.maxDataLength()
@@ -30,7 +31,10 @@ func (t *Transport) initiateTx(payload []byte, txChan chan<- CanMessage) {
 
 		msg := t.makeTxMsg(data)
 		// 阻塞发送：对端 STmin=0 时会高速产生 CF，非阻塞入队在 TX 消费略慢时会丢帧并破坏多帧语义。
-		txChan <- msg
+		if !sendCanMessage(ctx, txChan, msg) {
+			t.stopSending()
+			return
+		}
 		// Done
 		t.stopSending() // Resets state to Idle
 
@@ -57,7 +61,10 @@ func (t *Transport) initiateTx(payload []byte, txChan chan<- CanMessage) {
 		t.txState = StateWaitFC
 
 		msg := t.makeTxMsg(data)
-		txChan <- msg
+		if !sendCanMessage(ctx, txChan, msg) {
+			t.stopSending()
+			return
+		}
 
 		// Start FC timeout timer
 		t.resetTxFCTimer()
@@ -93,7 +100,7 @@ func (t *Transport) handleTxFlowControl(fc *FlowControlFrame) {
 
 // handleTxTransmit sends the next Consecutive Frame.
 // It is called when STmin timer expires.
-func (t *Transport) handleTxTransmit(txChan chan<- CanMessage) {
+func (t *Transport) handleTxTransmit(ctx context.Context, txChan chan<- CanMessage) {
 	if len(t.txBuffer) == 0 {
 		t.stopSending()
 		return
@@ -120,7 +127,10 @@ func (t *Transport) handleTxTransmit(txChan chan<- CanMessage) {
 	t.txBlockCounter++
 
 	msg := t.makeTxMsg(data)
-	txChan <- msg
+	if !sendCanMessage(ctx, txChan, msg) {
+		t.stopSending()
+		return
+	}
 
 	if len(t.txBuffer) == 0 {
 		// Transfer finished
@@ -138,6 +148,15 @@ func (t *Transport) handleTxTransmit(txChan chan<- CanMessage) {
 		// Continue sending after STmin
 		// Use the stored stmin value (we parsed it from FC)
 		t.resetTxSTminTimer(t.remoteSTmin)
+	}
+}
+
+func sendCanMessage(ctx context.Context, txChan chan<- CanMessage, msg CanMessage) bool {
+	select {
+	case txChan <- msg:
+		return true
+	case <-ctx.Done():
+		return false
 	}
 }
 

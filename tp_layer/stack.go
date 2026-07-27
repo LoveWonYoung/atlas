@@ -2,9 +2,16 @@ package tp_layer
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
+)
+
+var (
+	ErrReceiveQueueFull        = errors.New("ISO-TP receive queue full")
+	ErrConsecutiveFrameTimeout = errors.New("ISO-TP consecutive-frame timeout")
+	ErrFlowControlTimeout      = errors.New("ISO-TP flow-control timeout")
 )
 
 // Transport 是ISOTP协议栈的核心结构
@@ -86,9 +93,24 @@ func (t *Transport) SetFDMode(isFD bool) {
 	}
 }
 
-// Send sends data. It might block if the send buffer is full.
+// Send sends data and preserves the legacy blocking behavior.
 func (t *Transport) Send(data []byte) {
-	t.txDataChan <- data
+	_ = t.SendContext(context.Background(), data)
+}
+
+// SendContext queues data for transmission or returns when the context is
+// canceled. The payload is copied so callers may safely reuse their buffer.
+func (t *Transport) SendContext(ctx context.Context, data []byte) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	payload := append([]byte(nil), data...)
+	select {
+	case t.txDataChan <- payload:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 // Recv receives data. It matches the old signature but now pulls from channel.
@@ -126,23 +148,23 @@ func (t *Transport) Run(ctx context.Context, rxChan <-chan CanMessage, txChan ch
 			if !ok {
 				return
 			}
-			t.ProcessRx(msg, txChan)
+			t.processRx(ctx, msg, txChan)
 		case data, ok := <-txDataEnable:
 			if !ok {
 				return
 			}
-			t.initiateTx(data, txChan)
+			t.initiateTx(ctx, data, txChan)
 		case <-t.timerRxCF.C:
-			fmt.Println("接收连续帧超时，重置接收状态。")
+			t.fireError(ErrConsecutiveFrameTimeout)
 			t.stopReceiving()
 		case <-t.timerRxFC.C:
-			fmt.Println("等待流控帧超时，停止发送。")
+			t.fireError(ErrFlowControlTimeout)
 			t.stopSending()
 		case <-t.timerTxSTmin.C:
 			if t.txState != StateTransmit {
 				continue
 			}
-			t.handleTxTransmit(txChan)
+			t.handleTxTransmit(ctx, txChan)
 		}
 	}
 }

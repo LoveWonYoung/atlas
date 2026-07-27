@@ -105,11 +105,21 @@ func (a *AutoDriver) Init() error {
 }
 
 func (a *AutoDriver) Start() {
-	if drv := a.getDriver(); drv != nil {
-		drv.Start()
-		return
+	if err := a.StartWithError(); err != nil {
+		log.Printf("Auto can_driver start failed: %v", err)
 	}
-	log.Println("Auto can_driver start called before init")
+}
+
+func (a *AutoDriver) StartWithError() error {
+	drv := a.getDriver()
+	if drv == nil {
+		return fmt.Errorf("%w: AutoDriver", ErrDriverNotInitialized)
+	}
+	if starter, ok := drv.(ErrorStartingCANDriver); ok {
+		return starter.StartWithError()
+	}
+	drv.Start()
+	return nil
 }
 
 func (a *AutoDriver) Stop() {
@@ -135,6 +145,35 @@ func (a *AutoDriver) RxChan() <-chan CanFrame {
 		return drv.RxChan()
 	}
 	return nil
+}
+
+func (a *AutoDriver) SubscribeRx(buffer int) (<-chan CanFrame, func()) {
+	drv := a.getDriver()
+	if drv == nil {
+		return nil, func() {}
+	}
+	if subscriber, ok := drv.(RxSubscriber); ok {
+		return subscriber.SubscribeRx(buffer)
+	}
+	return drv.RxChan(), func() {}
+}
+
+func (a *AutoDriver) Errors() <-chan error {
+	if drv := a.getDriver(); drv != nil {
+		if observable, ok := drv.(ObservableCANDriver); ok {
+			return observable.Errors()
+		}
+	}
+	return closedDriverErrors
+}
+
+func (a *AutoDriver) Stats() DriverStats {
+	if drv := a.getDriver(); drv != nil {
+		if observable, ok := drv.(ObservableCANDriver); ok {
+			return observable.Stats()
+		}
+	}
+	return DriverStats{}
 }
 
 func (a *AutoDriver) IsFDMode() bool {

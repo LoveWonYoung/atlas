@@ -113,6 +113,7 @@ func defaultCANFDInitConfig() CanfdInitConfig {
 }
 
 type Toomoss struct {
+	driverObservability
 	rxChan          chan CanFrame
 	fanout          *rxFanout
 	ctx             context.Context
@@ -287,7 +288,7 @@ func (c *Toomoss) Init() error {
 func (c *Toomoss) prepareRuntime() {
 	c.ctx, c.cancel = context.WithCancel(context.Background())
 	c.rxChan = make(chan CanFrame, c.cfg.RxBufferSize)
-	c.fanout = newRxFanout(c.ctx, c.rxChan)
+	c.fanout = newRxFanout(c.ctx, c.rxChan, c.resetTelemetry())
 }
 
 func (c *Toomoss) fallbackToLegacyCAN(fdErr error) error {
@@ -357,16 +358,22 @@ func (c *Toomoss) initLegacyCANDevice() error {
 }
 
 func (c *Toomoss) Start() {
+	if err := c.StartWithError(); err != nil {
+		log.Printf("Toomoss start failed: %v", err)
+	}
+}
+
+func (c *Toomoss) StartWithError() error {
 	c.lifecycle.opMu.Lock()
 	defer c.lifecycle.opMu.Unlock()
 	if !c.lifecycle.isInitialized() {
-		log.Println("Toomoss start called before successful initialization")
-		return
+		return fmt.Errorf("%w: Toomoss", ErrDriverNotInitialized)
 	}
 	c.drainInitialBuffer()
 	if c.lifecycle.start(c.readLoop) {
 		log.Println("CAN驱动的中央读取服务已启动...")
 	}
+	return nil
 }
 
 func (c *Toomoss) Stop() {
@@ -387,6 +394,7 @@ func (c *Toomoss) Stop() {
 		close(c.rxChan)
 		c.rxChan = nil
 	}
+	c.closeTelemetry()
 	if c.ownsDevice {
 		releaseToomossSession()
 		c.ownsDevice = false
@@ -439,11 +447,7 @@ func (c *Toomoss) readLoop() {
 				}
 				logCANMessage("RX", unifiedMsg.ID, unifiedMsg.DLC, unifiedMsg.Data[:actualLen], msgType)
 
-				select {
-				case c.rxChan <- unifiedMsg:
-				default:
-					log.Println("警告: 驱动接收channel(FD)已满，消息被丢弃")
-				}
+				c.publishRx(c.ctx, c.rxChan, unifiedMsg)
 			}
 		}
 	}
@@ -503,11 +507,7 @@ func (c *Toomoss) readClassicBurst(canMsg *[MsgBufferSize]CanMsg) {
 		}
 
 		logCANMessage("RX", unifiedMsg.ID, unifiedMsg.DLC, unifiedMsg.Data[:actualLen], CAN)
-		select {
-		case c.rxChan <- unifiedMsg:
-		default:
-			log.Println("Warning: CAN receive channel is full, dropping message")
-		}
+		c.publishRx(c.ctx, c.rxChan, unifiedMsg)
 	}
 }
 
@@ -595,11 +595,7 @@ func (c *Toomoss) Write(id int32, fd bool, data []byte) error {
 
 		logCANMessage("TX", uint32(id), normalizedDLC, canFDMsg[0].Data[:len(data)], logType)
 		if c.cfg.IncludeTxEcho {
-			select {
-			case c.rxChan <- unifiedMsg:
-			default:
-				log.Println("警告: 驱动接收channel(FD)已满，消息被丢弃")
-			}
+			c.publishRx(c.ctx, c.rxChan, unifiedMsg)
 		}
 	} else {
 		log.Printf("错误: CAN/CANFD消息发送失败, ID=0x%03X", id)
@@ -651,11 +647,7 @@ func (c *Toomoss) writeClassicCAN(id int32, fd bool, data []byte) error {
 	}
 	logCANMessage("TX", canID, unifiedMsg.DLC, data, CAN)
 	if c.cfg.IncludeTxEcho {
-		select {
-		case c.rxChan <- unifiedMsg:
-		default:
-			log.Println("Warning: CAN receive channel is full, dropping TX echo")
-		}
+		c.publishRx(c.ctx, c.rxChan, unifiedMsg)
 	}
 	return nil
 }
@@ -666,7 +658,17 @@ func (c *Toomoss) RxChan() <-chan CanFrame {
 	if c.fanout == nil {
 		return nil
 	}
-	return c.fanout.Subscribe(c.cfg.RxBufferSize)
+	ch, _ := c.fanout.Subscribe(c.cfg.RxBufferSize)
+	return ch
+}
+
+func (c *Toomoss) SubscribeRx(buffer int) (<-chan CanFrame, func()) {
+	c.lifecycle.opMu.Lock()
+	defer c.lifecycle.opMu.Unlock()
+	if c.fanout == nil {
+		return nil, func() {}
+	}
+	return c.fanout.Subscribe(buffer)
 }
 
 func (c *Toomoss) IsFDMode() bool {

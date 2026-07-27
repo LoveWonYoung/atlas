@@ -25,6 +25,8 @@ type MockCANDriver struct {
 	responses []MockResponse // 预设的响应
 	respIndex int
 	initErr   error // Init() 返回的错误
+	startErr  error
+	errChan   chan error
 }
 
 // MockResponse 定义一个预设的响应
@@ -36,16 +38,20 @@ type MockResponse struct {
 func NewMockCANDriver() *MockCANDriver {
 	_, cancel := context.WithCancel(context.Background())
 	return &MockCANDriver{
-		rxChan: make(chan can_driver.CanFrame, 100),
-		cancel: cancel,
+		rxChan:  make(chan can_driver.CanFrame, 100),
+		cancel:  cancel,
+		errChan: make(chan error, 10),
 	}
 }
 
 func (m *MockCANDriver) Init() error                        { return m.initErr }
 func (m *MockCANDriver) Start()                             {}
+func (m *MockCANDriver) StartWithError() error              { return m.startErr }
 func (m *MockCANDriver) Stop()                              { m.cancel() }
 func (m *MockCANDriver) RxChan() <-chan can_driver.CanFrame { return m.rxChan }
 func (m *MockCANDriver) IsFDMode() bool                     { return m.fdMode }
+func (m *MockCANDriver) Errors() <-chan error               { return m.errChan }
+func (m *MockCANDriver) Stats() can_driver.DriverStats      { return can_driver.DriverStats{} }
 
 func (m *MockCANDriver) Write(id int32, fd bool, data []byte) error {
 	m.mu.Lock()
@@ -165,6 +171,12 @@ func (t *MockTransport) SetAutoResponse(delay time.Duration, data []byte) {
 	defer t.mu.Unlock()
 	t.autoDelay = delay
 	t.autoResp = append([]byte{}, data...)
+}
+
+func (t *MockTransport) SendCount() int {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return len(t.sendQueue)
 }
 
 // ============================================================================
@@ -347,7 +359,6 @@ func TestSetAddressingMode(t *testing.T) {
 	client := &UDSClient{
 		stack:    mockTransport,
 		mode:     AddressPhysical,
-		reqMu:    sync.Mutex{},
 		funcAddr: nil,
 	}
 
@@ -423,6 +434,145 @@ func TestRequestWithContextAndAddressingModeUsesFunctionalAddressForSingleReques
 	}
 	if got := mockTransport.sendTxIDs[len(mockTransport.sendTxIDs)-1]; got != 0 {
 		t.Fatalf("后续默认请求应该恢复物理寻址，实际 tx id: 0x%X", got)
+	}
+}
+
+func TestRequestCancellationInterruptsRetryDelay(t *testing.T) {
+	driver := NewMockCANDriver()
+	transport := NewMockTransport()
+	transport.SetAutoResponse(0, []byte{0x7F, 0x22, BusyRepeatRequest})
+	client := newUDSClient(driver, transport)
+	defer client.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	defer cancel()
+	started := time.Now()
+	_, err := client.RequestWithContext(ctx, []byte{0x22, 0xF1, 0x90}, RequestOptions{
+		Timeout:                100 * time.Millisecond,
+		MaxRetries:             3,
+		RetryDelay:             time.Second,
+		ResponsePendingTimeout: time.Second,
+		OverallTimeout:         2 * time.Second,
+	})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("RequestWithContext error = %v, want context deadline exceeded", err)
+	}
+	if elapsed := time.Since(started); elapsed > 250*time.Millisecond {
+		t.Fatalf("cancellation took too long: %v", elapsed)
+	}
+}
+
+func TestRequestCancellationWhileWaitingForAnotherRequest(t *testing.T) {
+	driver := NewMockCANDriver()
+	transport := NewMockTransport()
+	client := newUDSClient(driver, transport)
+	defer client.Close()
+
+	firstCtx, cancelFirst := context.WithCancel(context.Background())
+	firstDone := make(chan error, 1)
+	go func() {
+		_, err := client.RequestWithContext(firstCtx, []byte{0x22, 0xF1, 0x90}, RequestOptions{
+			Timeout:        time.Second,
+			OverallTimeout: time.Second,
+		})
+		firstDone <- err
+	}()
+
+	deadline := time.Now().Add(200 * time.Millisecond)
+	for transport.SendCount() == 0 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if transport.SendCount() == 0 {
+		cancelFirst()
+		t.Fatal("first request did not start")
+	}
+
+	secondCtx, cancelSecond := context.WithTimeout(context.Background(), 25*time.Millisecond)
+	defer cancelSecond()
+	started := time.Now()
+	_, err := client.RequestWithContext(secondCtx, []byte{0x22, 0xF1, 0x91}, RequestOptions{
+		Timeout:        time.Second,
+		OverallTimeout: time.Second,
+	})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("second request error = %v, want context deadline exceeded", err)
+	}
+	if elapsed := time.Since(started); elapsed > 250*time.Millisecond {
+		t.Fatalf("waiting request cancellation took too long: %v", elapsed)
+	}
+
+	cancelFirst()
+	if err := <-firstDone; !errors.Is(err, context.Canceled) {
+		t.Fatalf("first request error = %v, want context canceled", err)
+	}
+}
+
+func TestRequestOverallTimeoutBoundsResponsePending(t *testing.T) {
+	driver := NewMockCANDriver()
+	transport := NewMockTransport()
+	transport.SetAutoResponse(0, []byte{0x7F, 0x22, RequestCorrectlyReceived_ResponsePending})
+	client := newUDSClient(driver, transport)
+	defer client.Close()
+
+	started := time.Now()
+	_, err := client.RequestWithContext(context.Background(), []byte{0x22, 0xF1, 0x90}, RequestOptions{
+		Timeout:                100 * time.Millisecond,
+		ResponsePendingTimeout: time.Second,
+		OverallTimeout:         30 * time.Millisecond,
+	})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("RequestWithContext error = %v, want context deadline exceeded", err)
+	}
+	if elapsed := time.Since(started); elapsed > 250*time.Millisecond {
+		t.Fatalf("overall timeout took too long: %v", elapsed)
+	}
+}
+
+func TestCloseIsIdempotentAndWaits(t *testing.T) {
+	driver := NewMockCANDriver()
+	client := newUDSClient(driver, NewMockTransport())
+
+	client.Close()
+	if !client.IsClosed() {
+		t.Fatal("client should be closed")
+	}
+	client.Close()
+}
+
+func TestNewUDSClientReturnsDriverStartError(t *testing.T) {
+	driver := NewMockCANDriver()
+	driver.startErr = errors.New("start failed")
+	addr, err := isotp.NewAddress(0x700, 0x708)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	client, err := NewUDSClient(driver, addr, isotp.DefaultConfig())
+	if client != nil {
+		t.Fatal("client should be nil after a start failure")
+	}
+	if err == nil || !errors.Is(err, driver.startErr) {
+		t.Fatalf("NewUDSClient error = %v, want start failure", err)
+	}
+}
+
+func TestRequestReturnsAsynchronousDriverError(t *testing.T) {
+	driver := NewMockCANDriver()
+	client := newUDSClient(driver, NewMockTransport())
+	defer client.Close()
+
+	want := errors.New("receive overflow")
+	go func() {
+		time.Sleep(5 * time.Millisecond)
+		driver.errChan <- want
+	}()
+
+	_, err := client.RequestWithContext(context.Background(), []byte{0x22, 0xF1, 0x90}, RequestOptions{
+		Timeout:        time.Second,
+		OverallTimeout: time.Second,
+	})
+	if !errors.Is(err, want) {
+		t.Fatalf("RequestWithContext error = %v, want asynchronous driver error", err)
 	}
 }
 

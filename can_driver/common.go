@@ -2,6 +2,7 @@ package can_driver
 
 import (
 	"context"
+	"errors"
 	"log"
 	"sync"
 )
@@ -98,6 +99,14 @@ type CANDriver interface {
 	Write(id int32, fd bool, data []byte) error
 	RxChan() <-chan CanFrame
 	IsFDMode() bool
+}
+
+var ErrDriverNotInitialized = errors.New("CAN driver is not initialized")
+
+// ErrorStartingCANDriver is an optional extension for drivers that can report
+// startup failures without changing the legacy CANDriver interface.
+type ErrorStartingCANDriver interface {
+	StartWithError() error
 }
 
 // driverLifecycle serializes initialization/cleanup and makes the read loop

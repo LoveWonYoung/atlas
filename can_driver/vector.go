@@ -142,6 +142,7 @@ type xlCanFdConf struct {
 }
 
 type Vector struct {
+	driverObservability
 	canType   CanType
 	cfg       Config
 	rxChan    chan CanFrame
@@ -211,7 +212,7 @@ func (v *Vector) Init() error {
 	v.CANChannel = int(cfg.Channel)
 	v.ctx, v.cancel = context.WithCancel(context.Background())
 	v.rxChan = make(chan CanFrame, cfg.RxBufferSize)
-	v.fanout = newRxFanout(v.ctx, v.rxChan)
+	v.fanout = newRxFanout(v.ctx, v.rxChan, v.resetTelemetry())
 	v.portHandle = vectorInvalidPortHandle
 	cleanup := func(err error) error {
 		v.cancel()
@@ -226,6 +227,7 @@ func (v *Vector) Init() error {
 		v.fanout = nil
 		v.rxChan = nil
 		v.portHandle = vectorInvalidPortHandle
+		v.closeTelemetry()
 		return err
 	}
 
@@ -254,15 +256,21 @@ func (v *Vector) Init() error {
 }
 
 func (v *Vector) Start() {
+	if err := v.StartWithError(); err != nil {
+		log.Printf("Vector start failed: %v", err)
+	}
+}
+
+func (v *Vector) StartWithError() error {
 	v.lifecycle.opMu.Lock()
 	defer v.lifecycle.opMu.Unlock()
 	if !v.lifecycle.isInitialized() || v.portHandle == vectorInvalidPortHandle {
-		log.Println("Vector not initialized, cannot start")
-		return
+		return fmt.Errorf("%w: Vector", ErrDriverNotInitialized)
 	}
 	if v.lifecycle.start(v.readLoop) {
 		log.Println("Vector can_driver started")
 	}
+	return nil
 }
 
 func (v *Vector) Stop() {
@@ -289,6 +297,7 @@ func (v *Vector) Stop() {
 		close(v.rxChan)
 		v.rxChan = nil
 	}
+	v.closeTelemetry()
 	v.portHandle = vectorInvalidPortHandle
 }
 
@@ -392,7 +401,17 @@ func (v *Vector) RxChan() <-chan CanFrame {
 	if v.fanout == nil {
 		return nil
 	}
-	return v.fanout.Subscribe(v.cfg.RxBufferSize)
+	ch, _ := v.fanout.Subscribe(v.cfg.RxBufferSize)
+	return ch
+}
+
+func (v *Vector) SubscribeRx(buffer int) (<-chan CanFrame, func()) {
+	v.lifecycle.opMu.Lock()
+	defer v.lifecycle.opMu.Unlock()
+	if v.fanout == nil {
+		return nil, func() {}
+	}
+	return v.fanout.Subscribe(buffer)
 }
 
 func (v *Vector) Config() Config {
@@ -631,11 +650,7 @@ func (v *Vector) readOneCanFD() bool {
 	}
 	logCANMessage("RX", unified.ID, unified.DLC, unified.Data[:payloadLen], msgType)
 
-	select {
-	case v.rxChan <- unified:
-	default:
-		log.Println("Warning: Vector receive channel full, dropping message")
-	}
+	v.publishRx(v.ctx, v.rxChan, unified)
 
 	return true
 }
@@ -683,11 +698,7 @@ func (v *Vector) readOneCAN() bool {
 
 	logCANMessage("RX", unified.ID, unified.DLC, unified.Data[:payloadLen], CAN)
 
-	select {
-	case v.rxChan <- unified:
-	default:
-		log.Println("Warning: Vector receive channel full, dropping message")
-	}
+	v.publishRx(v.ctx, v.rxChan, unified)
 
 	return true
 }

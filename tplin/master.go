@@ -188,3 +188,8 @@ func (m *LinMaster) Errors() <-chan error { return m.transport.Errors() }
 func (m *LinMaster) ReceiveDiagnostic() *LinMessage {
 	return m.transport.Receive()
 }
+
+// ReceiveDiagnosticChan returns the event-driven diagnostic receive stream.
+func (m *LinMaster) ReceiveDiagnosticChan() <-chan *LinMessage {
+	return m.transport.ReceiveChan()
+}

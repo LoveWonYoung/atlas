@@ -12,11 +12,15 @@
 
 ## 模块结构
 
-仓库主要分成三层：
+仓库围绕 CAN、LIN 两条诊断链路分层：
 
-- `driver`：底层 CAN 驱动统一接口，屏蔽不同厂商设备差异
+- `can_driver`：底层 CAN/CAN FD 驱动统一接口，屏蔽不同厂商设备差异
+- `liniface` / `lin_driver`：LIN 驱动接口与硬件实现
 - `tp_layer`：ISO-15765-2 传输层，实现单帧、多帧、流控、超时管理
-- `uds_client`：基于 `driver + ISO-TP` 的 UDS 客户端，负责请求、超时、负响应和重试逻辑
+- `tplin`：LIN 传输层，支持 master、slave 和模拟网络
+- `uds_client`：基于 CAN + ISO-TP 的 UDS 客户端
+- `uds_client_lin`：基于 LIN 的 UDS 客户端
+- `preset`：组装驱动、传输层和 UDS 客户端的便捷入口
 
 通过 `UDSClient.Request(...)` 可以发送任意 UDS SID。
 
@@ -24,16 +28,16 @@
 
 ### 本地硬件驱动
 
-- `driver.NewToomoss(...)`
+- `can_driver.NewToomoss(...)`
   - Windows
   - macOS（`darwin && cgo`）
-- `driver.NewTSMaster(...)`
+- `can_driver.NewTSMaster(...)`
   - Windows
-- `driver.NewPCAN(...)`
+- `can_driver.NewPCAN(...)`
   - Windows
-- `driver.NewVector(...)`
+- `can_driver.NewVector(...)`
   - Windows
-- `driver.NewAutoDriver(...)`
+- `can_driver.NewAutoDriver(...)`
   - Windows
   - 按 `Toomoss -> TSMaster -> PCAN -> Vector` 顺序自动选择第一个可用设备
 
@@ -56,7 +60,7 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/LoveWonYoung/atlas/driver"
+	driver "github.com/LoveWonYoung/atlas/can_driver"
 	isotp "github.com/LoveWonYoung/atlas/tp_layer"
 	"github.com/LoveWonYoung/atlas/uds_client"
 )
@@ -136,6 +140,20 @@ tsmaster := driver.NewTSMasterWithMapping(cfg, driver.TC1016, mapping)
 
 `AutoDriver` 会按默认顺序探测设备，清理初始化失败或模式不匹配的候选。也可以通过 `AutoCandidate` 传入自定义顺序和设备构造参数。
 
+### 接收队列与错误观测
+
+内置驱动实现了可选的 `can_driver.ObservableCANDriver`，可以读取异步错误和丢帧统计：
+
+```go
+if observable, ok := dev.(driver.ObservableCANDriver); ok {
+	stats := observable.Stats()
+	fmt.Printf("source dropped=%d, subscriber dropped=%d\n",
+		stats.SourceDropped, stats.SubscriberDropped)
+}
+```
+
+需要提前释放接收订阅时，可以使用可选的 `can_driver.RxSubscriber`。原有 `RxChan()` 接口仍保持兼容。
+
 ## 寻址与 ISO-TP 配置
 
 Lite 版只支持标准 11 位 CAN ID 的普通寻址。创建连接时直接传入发送 ID 和接收 ID：
@@ -188,9 +206,11 @@ cfg := isotp.DefaultConfig()
 resp, err := client.Request([]byte{0x10, 0x03})
 ```
 
+`RequestOptions` 可以分别配置首次响应超时、`0x78 Response Pending` 超时和包含重试在内的总体超时。Context 取消会中止入队、重试等待和响应等待。
+
 ## 注意事项
 
-- `driver` 层只提供统一的 `Write(id, fd, data)` 能力，通过 `fd` 标志在同一函数里发送 CAN / CAN-FD。
+- `can_driver` 层提供统一的 `Write(id, fd, data)` 能力，通过 `fd` 标志在同一函数里发送 CAN / CAN-FD。
 - 驱动层只接受 `0x000-0x7FF` 的标准 11 位 CAN ID。
 - UDS 服务请求由调用方通过 `UDSClient.Request(...)` 直接组装。
 - `UDSClient.Close()` 会同时关闭后台 goroutine 和底层设备连接，使用结束后应主动调用。
@@ -201,7 +221,7 @@ resp, err := client.Request([]byte{0x10, 0x03})
 go test ./...
 ```
 
-当前仓库已经包含 `tp_layer`、`uds_client` 的测试。
+当前仓库已经包含 `can_driver`、`tp_layer`、`tplin`、`uds_client`、`uds_client_lin` 和 `preset` 的测试。
 
 ## License
 
