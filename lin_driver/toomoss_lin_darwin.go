@@ -336,6 +336,12 @@ func usbClose() error {
 	return nil
 }
 
+// UsbClose closes the LIN-side USB adapter and unloads dylibs.
+// Call manually after ToomossLIN.Close(); Close itself does not close USB.
+func UsbClose() error {
+	return usbClose()
+}
+
 func ensureLinReady() error {
 	if err := ensureToomossLoaded(); err != nil {
 		return fmt.Errorf("load Toomoss LIN dylibs: %w", err)
@@ -665,24 +671,21 @@ func (d *ToomossLIN) eventChannel(channel liniface.Channel) chan *liniface.LinEv
 	return eventChan
 }
 
-// Close releases the USB adapter and loaded can_driver library.
+// Close marks this LIN instance closed and clears the singleton flag.
+// It does not close USB; call UsbClose() manually when finished with the adapter.
 func (d *ToomossLIN) Close() error {
 	if d == nil {
 		return nil
 	}
-	var closeErr error
 	d.closeOnce.Do(func() {
 		d.stateMu.Lock()
 		d.closed = true
 		d.stateMu.Unlock()
-		d.callMu.Lock()
-		closeErr = usbClose()
-		d.callMu.Unlock()
 		toomossInstanceMu.Lock()
 		toomossInstanceActive = false
 		toomossInstanceMu.Unlock()
 	})
-	return closeErr
+	return nil
 }
 
 func (d *ToomossLIN) LinBreak(channel byte) error {

@@ -198,9 +198,10 @@ func (c *Toomoss) Init() error {
 		return errors.New("another Toomoss can_driver instance is already using the device")
 	}
 	c.ownsDevice = true
-	opened := false
+	// Only close USB on Init failure if this Init opened it (may already be open for LIN).
+	openedHere := false
 	cleanup := func(err error) error {
-		if opened {
+		if openedHere {
 			_ = UsbClose()
 		}
 		if c.ownsDevice {
@@ -213,6 +214,7 @@ func (c *Toomoss) Init() error {
 	if err := ensureToomossLoaded(); err != nil {
 		return cleanup(fmt.Errorf("failed to load Toomoss DLLs: %w", err))
 	}
+	alreadyOpen := IsToomossUSBOpened()
 	if ok, err := usbScan(); err != nil {
 		return cleanup(fmt.Errorf("USB scan failed: %w", err))
 	} else if !ok {
@@ -223,7 +225,7 @@ func (c *Toomoss) Init() error {
 	} else if !ok {
 		return cleanup(errors.New("USB open failed"))
 	}
-	opened = true
+	openedHere = !alreadyOpen
 	fallback := func(fdErr error) error {
 		if err := c.fallbackToLegacyCAN(fdErr); err != nil {
 			return cleanup(err)
@@ -380,16 +382,13 @@ func (c *Toomoss) Stop() {
 	c.lifecycle.opMu.Lock()
 	defer c.lifecycle.opMu.Unlock()
 	log.Println("正在停止CAN-FD驱动的读取服务...")
-	wasInitialized := c.lifecycle.cancelAndWait(c.cancel)
+	_ = c.lifecycle.cancelAndWait(c.cancel)
 	if c.fanout != nil {
 		c.fanout.Close()
 		c.fanout = nil
 	}
-	if wasInitialized {
-		if err := UsbClose(); err != nil {
-			log.Printf("警告: USB关闭失败: %v", err)
-		}
-	}
+	// Do not UsbClose here: CAN and LIN share one USB handle.
+	// Call UsbClose() manually after all Toomoss CAN/LIN users are done.
 	if c.rxChan != nil {
 		close(c.rxChan)
 		c.rxChan = nil

@@ -48,6 +48,12 @@ const (
 var (
 	toomossInstanceMu     sync.Mutex
 	toomossInstanceActive bool
+
+	linExInit         uintptr
+	linExMasterSync   uintptr
+	linEXSlaveGetData uintptr
+	linProcsDLL       syscall.Handle
+	linProcsMu        sync.Mutex
 )
 
 type LinExMsg struct {
@@ -86,6 +92,51 @@ func logLINMessage(direction string, id byte, len_ byte, cs byte, data []byte) {
 	log.Printf(format, direction, id, len_, cs, data)
 }
 
+// ensureLinReady loads shared USB2XXX.dll via can_driver, then resolves LIN_EX_* procs lazily.
+func ensureLinReady() error {
+	if err := can_driver.EnsureToomossLoaded(); err != nil {
+		return err
+	}
+
+	linProcsMu.Lock()
+	defer linProcsMu.Unlock()
+
+	if linExInit != 0 && linExMasterSync != 0 && linEXSlaveGetData != 0 && linProcsDLL == can_driver.UsbDeviceDLL {
+		return nil
+	}
+
+	if can_driver.UsbDeviceDLL == 0 {
+		return errors.New("USB2XXX.dll not loaded")
+	}
+
+	get := func(name string) (uintptr, error) {
+		addr, err := syscall.GetProcAddress(can_driver.UsbDeviceDLL, name)
+		if addr == 0 {
+			if err == nil {
+				err = errors.New("not found")
+			}
+			return 0, fmt.Errorf("%s: %w", name, err)
+		}
+		return addr, nil
+	}
+
+	var err error
+	if linExInit, err = get("LIN_EX_Init"); err != nil {
+		return fmt.Errorf("LIN APIs are not available in USB2XXX.dll: %w", err)
+	}
+	if linExMasterSync, err = get("LIN_EX_MasterSync"); err != nil {
+		linExInit = 0
+		return fmt.Errorf("LIN APIs are not available in USB2XXX.dll: %w", err)
+	}
+	if linEXSlaveGetData, err = get("LIN_EX_SlaveGetData"); err != nil {
+		// SlaveGetData is optional for master-only use; keep others.
+		linEXSlaveGetData = 0
+		log.Printf("Toomoss LIN proc not available: LIN_EX_SlaveGetData (%v)", err)
+	}
+	linProcsDLL = can_driver.UsbDeviceDLL
+	return nil
+}
+
 func NewToomossLIN(channel []byte, mode byte) (*ToomossLIN, error) {
 	toomossInstanceMu.Lock()
 	defer toomossInstanceMu.Unlock()
@@ -95,7 +146,7 @@ func NewToomossLIN(channel []byte, mode byte) (*ToomossLIN, error) {
 	if len(channel) == 0 {
 		return nil, errors.New("at least one LIN channel is required")
 	}
-	if err := can_driver.EnsureLinReady(); err != nil {
+	if err := ensureLinReady(); err != nil {
 		return nil, err
 	}
 	// CAN 的 Init 也会 UsbScan/UsbOpen；已打开则复用 handle，避免重复打开报错。
@@ -110,7 +161,7 @@ func NewToomossLIN(channel []byte, mode byte) (*ToomossLIN, error) {
 		openedHere = true
 	}
 	for _, ch := range channel {
-		if tmsInit, ret, err := syscall.SyscallN(can_driver.LinExInit, uintptr(can_driver.DevHandle[can_driver.DEVIndex]), uintptr(ch), uintptr(Bt), uintptr(mode)); tmsInit != 0 {
+		if tmsInit, ret, err := syscall.SyscallN(linExInit, uintptr(can_driver.DevHandle[can_driver.DEVIndex]), uintptr(ch), uintptr(Bt), uintptr(mode)); tmsInit != 0 {
 			if openedHere {
 				_ = can_driver.UsbClose()
 			}
@@ -143,7 +194,7 @@ func (d *ToomossLIN) LinMasterSync(msg, outMsg []LinExMsg, channel byte) (uintpt
 		return 0, err
 	}
 	ret, _, err := syscall.SyscallN(
-		can_driver.LinExMasterSync,
+		linExMasterSync,
 		uintptr(can_driver.DevHandle[can_driver.DEVIndex]),
 		uintptr(channel),
 		uintptr(unsafe.Pointer(&msg[0])),
@@ -349,24 +400,22 @@ func (d *ToomossLIN) eventChannel(channel liniface.Channel) chan *liniface.LinEv
 	return eventChan
 }
 
-// Close releases the USB adapter and loaded can_driver library.
+// Close marks this LIN instance closed and clears the singleton flag.
+// It does not call USB_CloseDevice; CAN/LIN share one USB handle on Windows.
+// Call can_driver.UsbClose() manually after all Toomoss CAN/LIN users are done.
 func (d *ToomossLIN) Close() error {
 	if d == nil {
 		return nil
 	}
-	var closeErr error
 	d.closeOnce.Do(func() {
 		d.stateMu.Lock()
 		d.closed = true
 		d.stateMu.Unlock()
-		d.callMu.Lock()
-		closeErr = can_driver.UsbClose()
-		d.callMu.Unlock()
 		toomossInstanceMu.Lock()
 		toomossInstanceActive = false
 		toomossInstanceMu.Unlock()
 	})
-	return closeErr
+	return nil
 }
 
 func (d *ToomossLIN) LinBreak(channel byte) error {
@@ -383,7 +432,7 @@ func (d *ToomossLIN) LinBreak(channel byte) error {
 const linExSlaveGetDataMaxFrames = 512
 
 func (d *ToomossLIN) LinExSlaveGetData(channel byte) ([]LinExMsg, error) {
-	if can_driver.LinEXSlaveGetData == 0 {
+	if linEXSlaveGetData == 0 {
 		return nil, errors.New("LIN_EX_SlaveGetData not loaded")
 	}
 
@@ -394,7 +443,7 @@ func (d *ToomossLIN) LinExSlaveGetData(channel byte) ([]LinExMsg, error) {
 		return nil, err
 	}
 	ret, _, callErr := syscall.SyscallN(
-		can_driver.LinEXSlaveGetData,
+		linEXSlaveGetData,
 		uintptr(can_driver.DevHandle[can_driver.DEVIndex]),
 		uintptr(channel),
 		uintptr(unsafe.Pointer(&linMsgs[0])),

@@ -200,6 +200,7 @@ var (
 	toomossLoaded    bool
 	toomossSessionMu sync.Mutex
 	toomossInUse     bool
+	toomossUSBOpened bool
 )
 
 func acquireToomossSession() bool {
@@ -221,6 +222,13 @@ func releaseToomossSession() {
 func resetToomossState() {
 	DevHandle = [10]C.int{}
 	toomossLoaded = false
+	toomossUSBOpened = false
+}
+
+func IsToomossUSBOpened() bool {
+	toomossSessionMu.Lock()
+	defer toomossSessionMu.Unlock()
+	return toomossUSBOpened
 }
 
 func ensureToomossLoaded() error {
@@ -247,6 +255,9 @@ func ensureToomossLoaded() error {
 }
 
 func usbScan() (bool, error) {
+	if IsToomossUSBOpened() {
+		return true, nil
+	}
 	if err := ensureToomossLoaded(); err != nil {
 		return false, err
 	}
@@ -268,12 +279,21 @@ func UsbScan() bool {
 }
 
 func usbOpen() (bool, error) {
+	if IsToomossUSBOpened() {
+		return true, nil
+	}
 	if err := ensureToomossLoaded(); err != nil {
 		return false, err
 	}
 
 	stateValue := int(C.can_toomoss_usb_open_device(DevHandle[DEVIndex]))
-	return stateValue >= 1, nil
+	ok := stateValue >= 1
+	if ok {
+		toomossSessionMu.Lock()
+		toomossUSBOpened = true
+		toomossSessionMu.Unlock()
+	}
+	return ok, nil
 }
 
 func UsbOpen() bool {
@@ -365,9 +385,10 @@ func (c *Toomoss) Init() error {
 		return errors.New("another Toomoss can_driver instance is already using the device")
 	}
 	c.ownsDevice = true
-	opened := false
+	// Only close USB on Init failure if this Init opened it (may already be open for LIN).
+	openedHere := false
 	cleanup := func(err error) error {
-		if opened {
+		if openedHere {
 			_ = usbClose()
 		}
 		if c.ownsDevice {
@@ -381,6 +402,7 @@ func (c *Toomoss) Init() error {
 		return cleanup(err)
 	}
 
+	alreadyOpen := IsToomossUSBOpened()
 	if ok, err := usbScan(); err != nil {
 		return cleanup(fmt.Errorf("USB scan failed: %w", err))
 	} else if !ok {
@@ -391,7 +413,7 @@ func (c *Toomoss) Init() error {
 	} else if !ok {
 		return cleanup(errors.New("USB open failed"))
 	}
-	opened = true
+	openedHere = !alreadyOpen
 
 	canFDInitConfig := C.CANFD_INIT_CONFIG{
 		Mode:         C.uint8_t(0),
@@ -460,16 +482,12 @@ func (c *Toomoss) Stop() {
 	c.lifecycle.opMu.Lock()
 	defer c.lifecycle.opMu.Unlock()
 	log.Println("正在停止CAN-FD驱动的读取服务...")
-	wasInitialized := c.lifecycle.cancelAndWait(c.cancel)
+	_ = c.lifecycle.cancelAndWait(c.cancel)
 	if c.fanout != nil {
 		c.fanout.Close()
 		c.fanout = nil
 	}
-	if wasInitialized {
-		if err := usbClose(); err != nil {
-			log.Printf("警告: USB关闭失败: %v", err)
-		}
-	}
+	// Do not UsbClose here: call UsbClose() manually after all Toomoss users are done.
 	if c.rxChan != nil {
 		close(c.rxChan)
 		c.rxChan = nil

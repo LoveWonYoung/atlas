@@ -36,10 +36,6 @@ var (
 	CANFDSendMsg        uintptr
 	CANFDGetCANSpeedArg uintptr
 
-	LinExInit         uintptr
-	LinExMasterSync   uintptr
-	LinEXSlaveGetData uintptr
-
 	DevHandle [10]int
 	DEVIndex  = 0
 
@@ -66,10 +62,7 @@ func releaseToomossSession() {
 }
 
 func toomossReady() bool {
-	return UsbDeviceDLL != 0 && UsbScanDevice != 0 && UsbOpenDevice != 0 && UsbCloseDevice != 0 &&
-		((CANInit != 0 && CANStartGetMsg != 0 && CANGetMsg != 0 && CANSendMsg != 0 && CANGetCANSpeedArg != 0) ||
-			(CANFDInit != 0 && CANFDStartGetMsg != 0 && CANFDGetMsg != 0 && CANFDSendMsg != 0 && CANFDGetCANSpeedArg != 0)) ||
-		(LinExInit != 0 && LinExMasterSync != 0 && LinEXSlaveGetData != 0)
+	return UsbDeviceDLL != 0 && UsbScanDevice != 0 && UsbOpenDevice != 0 && UsbCloseDevice != 0
 }
 
 func resetToomossState() {
@@ -87,20 +80,12 @@ func resetToomossState() {
 	CANFDGetMsg = 0
 	CANFDSendMsg = 0
 	CANFDGetCANSpeedArg = 0
-	LinExInit = 0
-	LinExMasterSync = 0
-	LinEXSlaveGetData = 0
 	toomossUSBOpened = false
 }
 
-func EnsureLinReady() error {
-	if err := ensureToomossLoaded(); err != nil {
-		return err
-	}
-	if LinExInit == 0 || LinExMasterSync == 0 {
-		return errors.New("LIN APIs are not available in USB2XXX.dll")
-	}
-	return nil
+// EnsureToomossLoaded loads USB2XXX.dll and core USB procs (shared by CAN/LIN).
+func EnsureToomossLoaded() error {
+	return ensureToomossLoaded()
 }
 
 func IsToomossUSBOpened() bool {
@@ -215,14 +200,11 @@ func loadProcAddresses() error {
 	loadOptionalProc("CANFD_SendMsg", &CANFDSendMsg)
 	loadOptionalProc("CANFD_GetCANSpeedArg", &CANFDGetCANSpeedArg)
 
-	loadOptionalProc("LIN_EX_Init", &LinExInit)
-	loadOptionalProc("LIN_EX_MasterSync", &LinExMasterSync)
-	loadOptionalProc("LIN_EX_SlaveGetData", &LinEXSlaveGetData)
-	if len(errs) > 0 && !toomossReady() {
+	if len(errs) > 0 {
 		return errors.New(strings.Join(errs, "; "))
 	}
 	if !toomossReady() {
-		return errors.New("required Toomoss CAN procedures are not available")
+		return errors.New("required Toomoss USB procedures are not available")
 	}
 	return nil
 }
